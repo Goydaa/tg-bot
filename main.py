@@ -3,11 +3,16 @@ import logging
 import sys
 import os
 from dotenv import load_dotenv
+import threading
+from health import run_health_server
 
-# Загружаем переменные окружения
+
+health_thread = threading.Thread(target=run_health_server, daemon=True)
+health_thread.start()
+
 load_dotenv()
 
-# Проверяем токен
+
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = os.getenv('ADMIN_ID')
 
@@ -69,4 +74,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n✅ Бот остановлен")
     except Exception as e:
+
         print(f"\n❌ Критическая ошибка: {e}")
