@@ -128,6 +128,7 @@ async def cmd_help(message: types.Message):
             "/applications - Новые заявки\n"
             "/view_all - Все заявки\n"
             "/stats_full - Полная статистика\n"
+            "/check_reminders - Проверить напоминания\n"
         )
     
     await message.answer(help_text)
@@ -179,10 +180,52 @@ async def cmd_applications(message: types.Message):
 @dp.message(Command("view_all"))
 async def cmd_view_all(message: types.Message):
     if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Доступ запрещен")
         return
     
     applications = db.get_all_applications()
-    await send_applications_list(message, applications, "Все заявки:")
+    
+    if not applications:
+        await message.answer("📭 Нет заявок в базе данных")
+        return
+    
+    # Группируем по статусу
+    new_apps = []
+    processed_apps = []
+    
+    for app in applications:
+        if app[11] == 'new':  # status field (index 11)
+            new_apps.append(app)
+        else:
+            processed_apps.append(app)
+    
+    text = "📋 ВСЕ ЗАЯВКИ\n\n"
+    
+    if new_apps:
+        text += "🆕 НОВЫЕ:\n"
+        for i, app in enumerate(new_apps[:10], 1):
+            app_id, _, _, full_name, _, _, app_type, _, date, time, created_at, _ = app
+            
+            if date:
+                date_display = f"{date} {time if time else ''}".strip()
+                text += f"{i}. 🆔{app_id} 👤{full_name} 📅{date_display}\n"
+            else:
+                text += f"{i}. 🆔{app_id} 👤{full_name} 📝{app_type}\n"
+    
+    if processed_apps:
+        text += "\n✅ ОБРАБОТАННЫЕ:\n"
+        for i, app in enumerate(processed_apps[:10], 1):
+            app_id, _, _, full_name, _, _, app_type, _, date, time, created_at, _ = app
+            
+            if date:
+                date_display = f"{date} {time if time else ''}".strip()
+                text += f"{i}. 🆔{app_id} 👤{full_name} 📅{date_display}\n"
+            else:
+                text += f"{i}. 🆔{app_id} 👤{full_name} 📝{app_type}\n"
+    
+    text += f"\n📊 Итого: {len(new_apps)} новых, {len(processed_apps)} обработанных"
+    
+    await message.answer(text)
 
 @dp.message(Command("stats_full"))
 async def cmd_stats_full(message: types.Message):
@@ -194,19 +237,51 @@ async def cmd_stats_full(message: types.Message):
     
     type_stats = {}
     for app in applications:
-        app_type = app[6]
+        app_type = app[6]  # application_type field
         type_stats[app_type] = type_stats.get(app_type, 0) + 1
     
-    stats_text = "📊 Полная статистика:\n\n"
+    stats_text = "📊 ПОЛНАЯ СТАТИСТИКА:\n\n"
     stats_text += f"Всего заявок: {stats['total']}\n"
     stats_text += f"Новых: {stats['new']}\n"
     stats_text += f"Обработано: {stats['processed']}\n\n"
-    stats_text += "По типам:\n"
     
-    for app_type, count in type_stats.items():
-        stats_text += f"• {app_type}: {count}\n"
+    if type_stats:
+        stats_text += "📝 По типам заявок:\n"
+        for app_type, count in type_stats.items():
+            stats_text += f"• {app_type}: {count}\n"
+    
+    # Статистика по датам
+    date_stats = {}
+    for app in applications:
+        date = app[8]  # appointment_date field
+        if date:
+            date_stats[date] = date_stats.get(date, 0) + 1
+    
+    if date_stats:
+        stats_text += "\n📅 По датам встреч:\n"
+        for date, count in list(date_stats.items())[:5]:  # Показываем 5 ближайших
+            stats_text += f"• {date}: {count} встреч\n"
     
     await message.answer(stats_text)
+
+@dp.message(Command("check_reminders"))
+async def cmd_check_reminders(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    reminders = db.get_due_reminders()
+    
+    if reminders:
+        await message.answer(f"📅 Найдено напоминаний для отправки: {len(reminders)}")
+        
+        for reminder in reminders[:5]:  # Показываем первые 5
+            app_id, reminder_id, user_id, username = reminder[0], reminder[1], reminder[2], reminder[3]
+            await message.answer(f"⏰ Напоминание #{reminder_id} для user {user_id} (заявка #{app_id})")
+        
+        if len(reminders) > 5:
+            await message.answer(f"... и еще {len(reminders) - 5} напоминаний")
+    else:
+        await message.answer("✅ Нет напоминаний для отправки")
 
 @dp.message(Command("cancel"))
 async def cmd_cancel(message: types.Message, state: FSMContext):
@@ -418,20 +493,22 @@ async def process_message(message: types.Message, state: FSMContext):
     
     await message.answer(confirmation_text, reply_markup=get_main_keyboard())
     
+    # Добавляем напоминание за день до встречи
     if user_data.get('appointment_date'):
         reminder_date = datetime.strptime(user_data['appointment_date'], '%Y-%m-%d')
-        reminder_date = reminder_date.replace(day=reminder_date.day - 1)
+        reminder_date = reminder_date.replace(day=reminder_date.day - 1)  # Напоминание за день до
         db.add_reminder(app_id, reminder_date.strftime('%Y-%m-%d'))
+        print(f"✅ Добавлено напоминание для заявки #{app_id} на {reminder_date}")
     
     await state.clear()
 
 async def notify_admin(app_id, user_data, message_text):
     try:
-        admin_text = "📝 Новая заявка!\n\n"
+        admin_text = "📝 НОВАЯ ЗАЯВКА!\n\n"
         
         if user_data.get('appointment_date'):
             date_display = datetime.strptime(user_data['appointment_date'], '%Y-%m-%d').strftime('%d.%m.%Y')
-            admin_text += f"📅 Встреча:\n\n"
+            admin_text += f"📅 ВСТРЕЧА:\n\n"
             admin_text += f"🆔 {app_id}\n"
             admin_text += f"👤 {user_data['full_name']}\n"
             admin_text += f"📅 {date_display}"
@@ -448,8 +525,7 @@ async def notify_admin(app_id, user_data, message_text):
         
         admin_text += f"📋 Тип: {user_data['application_type']}\n"
         admin_text += f"💬 Сообщение: {message_text[:100]}...\n\n"
-        
-        admin_text += f"ID пользователя: {app_id}"
+        admin_text += f"👤 ID пользователя: {app_id}"
         
         await bot.send_message(ADMIN_ID, admin_text)
     except Exception as e:
@@ -499,7 +575,7 @@ async def process_callback_handler(callback: types.CallbackQuery):
     
     await callback.answer("✅ Заявка отмечена как обработанная")
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.edit_text(f"{callback.message.text}\n\n✅ Обработано")
+    await callback.message.edit_text(f"{callback.message.text}\n\n✅ ОБРАБОТАНО")
 
 @dp.callback_query(lambda c: c.data.startswith("view_"))
 async def view_callback_handler(callback: types.CallbackQuery):
@@ -521,7 +597,7 @@ def format_application(application, detailed=False):
     app_id, user_id, username, full_name, contact_type, contact_data, app_type, message, date, time, created_at, status = application
     
     if date:
-        text = "📅 Встреча:\n\n"
+        text = "📅 ВСТРЕЧА:\n\n"
         text += f"🆔 {app_id}\n"
         text += f"👤 {full_name}\n"
         text += f"📅 {date}"
@@ -533,7 +609,7 @@ def format_application(application, detailed=False):
         contact_display = f"@{contact_data}" if contact_type == 'telegram' else contact_data
         text += f"📞 {contact_display}\n"
     else:
-        text = f"📋 Заявка #{app_id}\n\n"
+        text = f"📋 ЗАЯВКА #{app_id}\n\n"
         text += f"👤 {full_name}\n"
         text += f"📱 {contact_type}: {contact_data}\n"
     
@@ -558,11 +634,11 @@ async def send_applications_list(message: types.Message, applications, title):
     text = f"{title}\n\n"
     
     for i, app in enumerate(applications[:10], 1):
-        app_id, _, _, full_name, _, _, app_type, message, date, _, created_at, _ = app
+        app_id, _, _, full_name, _, _, app_type, _, date, _, created_at, _ = app
         
         if date:
             date_display = date
-            if app[9]:
+            if app[9]:  # time field
                 date_display += f" {app[9]}"
             
             text += f"{i}. 🆔{app_id} 👤{full_name} 📅{date_display}\n"
@@ -571,20 +647,26 @@ async def send_applications_list(message: types.Message, applications, title):
     
     await message.answer(text)
 
-# Напоминания
+# Система напоминаний
 async def reminder_scheduler():
+    print("⏰ Система напоминаний запущена")
     while True:
         try:
             reminders = db.get_due_reminders()
+            
+            if reminders:
+                print(f"🔔 Найдено напоминаний для отправки: {len(reminders)}")
+            
             for reminder in reminders:
                 app_id, reminder_id, user_id, username = reminder[0], reminder[1], reminder[2], reminder[3]
                 
                 application = db.get_application_by_id(app_id)
                 if application:
                     date_display = datetime.strptime(application[8], '%Y-%m-%d').strftime('%d.%m.%Y')
-                    reminder_text = f"🔔 Напоминание!\n\nУ вас запланирована встреча завтра ({date_display})"
+                    reminder_text = f"🔔 НАПОМИНАНИЕ!\n\n"
+                    reminder_text += f"У вас запланирована встреча завтра ({date_display})"
                     
-                    if application[9]:
+                    if application[9]:  # время
                         reminder_text += f" в {application[9]}"
                     
                     reminder_text += "\n\nНе забудьте подготовиться!"
@@ -592,12 +674,15 @@ async def reminder_scheduler():
                     try:
                         await bot.send_message(user_id, reminder_text)
                         db.mark_reminder_sent(reminder_id)
+                        print(f"✅ Напоминание отправлено пользователю {user_id} (заявка #{app_id})")
                     except Exception as e:
-                        logger.error(f"Ошибка отправки напоминания: {e}")
+                        print(f"❌ Ошибка отправки напоминания пользователю {user_id}: {e}")
             
-            await asyncio.sleep(3600)  # Проверка каждый час
+            # Ждем 1 час до следующей проверки
+            await asyncio.sleep(3600)
+            
         except Exception as e:
-            logger.error(f"Ошибка в планировщике: {e}")
+            print(f"❌ Ошибка в планировщике напоминаний: {e}")
             await asyncio.sleep(300)
 
 # Запуск бота
@@ -608,11 +693,17 @@ async def main():
     print(f"🤖 Бот: @CLA_on_bot")
     print(f"👨‍💼 Админ ID: {ADMIN_ID}")
     print("=" * 60)
+    print("⏰ Запуск системы напоминаний...")
     
     # Запуск планировщика напоминаний
     asyncio.create_task(reminder_scheduler())
+    
+    print("✅ Бот готов к работе!")
+    print("📱 Отправьте /start в Telegram")
+    print("=" * 60)
     
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
+
