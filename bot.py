@@ -5,7 +5,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime
 import os
 from dotenv import load_dotenv
@@ -21,11 +21,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Инициализация бота
-bot = Bot(token=os.getenv('BOT_TOKEN'))
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+ADMIN_ID = int(os.getenv('ADMIN_ID', '0'))
+
+bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 db = Database()
-
-ADMIN_ID = int(os.getenv('ADMIN_ID'))
 
 # Состояния FSM
 class ApplicationStates(StatesGroup):
@@ -140,6 +141,72 @@ async def cmd_stats(message: types.Message):
         f"Новых: {stats['new']}\n"
         f"Обработано: {stats['processed']}"
     )
+
+@dp.message(Command("admin"))
+async def cmd_admin(message: types.Message):
+    if message.from_user.id == ADMIN_ID:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Новые заявки", callback_data="admin_view_new")],
+            [InlineKeyboardButton(text="📊 Все заявки", callback_data="admin_view_all")],
+            [InlineKeyboardButton(text="📈 Статистика", callback_data="admin_stats")]
+        ])
+        await message.answer("👨‍💼 Панель администратора:", reply_markup=keyboard)
+    else:
+        await message.answer("⛔ У вас нет доступа к админ-панели")
+
+@dp.message(Command("applications"))
+async def cmd_applications(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Доступ запрещен")
+        return
+    
+    applications = db.get_applications('new')
+    
+    if not applications:
+        await message.answer("📭 Нет новых заявок")
+        return
+    
+    for app in applications[:5]:
+        app_text = format_application(app)
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Обработано", callback_data=f"process_{app[0]}"),
+             InlineKeyboardButton(text="📝 Просмотреть", callback_data=f"view_{app[0]}")]
+        ])
+        
+        await message.answer(app_text, reply_markup=keyboard)
+
+@dp.message(Command("view_all"))
+async def cmd_view_all(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    applications = db.get_all_applications()
+    await send_applications_list(message, applications, "Все заявки:")
+
+@dp.message(Command("stats_full"))
+async def cmd_stats_full(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    stats = db.get_stats()
+    applications = db.get_all_applications()
+    
+    type_stats = {}
+    for app in applications:
+        app_type = app[6]
+        type_stats[app_type] = type_stats.get(app_type, 0) + 1
+    
+    stats_text = "📊 Полная статистика:\n\n"
+    stats_text += f"Всего заявок: {stats['total']}\n"
+    stats_text += f"Новых: {stats['new']}\n"
+    stats_text += f"Обработано: {stats['processed']}\n\n"
+    stats_text += "По типам:\n"
+    
+    for app_type, count in type_stats.items():
+        stats_text += f"• {app_type}: {count}\n"
+    
+    await message.answer(stats_text)
 
 @dp.message(Command("cancel"))
 async def cmd_cancel(message: types.Message, state: FSMContext):
@@ -388,11 +455,123 @@ async def notify_admin(app_id, user_data, message_text):
     except Exception as e:
         logger.error(f"Ошибка при отправке уведомления админу: {e}")
 
+# Обработка кнопки "Статистика"
 @dp.message(F.text == "📊 Статистика")
 async def show_stats_button(message: types.Message):
     await cmd_stats(message)
 
-# Функция для планировщика напоминаний
+# Обработчики callback запросов для админ-панели
+@dp.callback_query(lambda c: c.data.startswith("admin_"))
+async def admin_callback_handler(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен")
+        return
+    
+    action = callback.data
+    
+    if action == "admin_view_new":
+        applications = db.get_applications('new')
+        await send_applications_list(callback.message, applications, "Новые заявки:")
+    
+    elif action == "admin_view_all":
+        applications = db.get_all_applications()
+        await send_applications_list(callback.message, applications, "Все заявки:")
+    
+    elif action == "admin_stats":
+        stats = db.get_stats()
+        await callback.message.answer(
+            f"📊 Статистика:\n\n"
+            f"Всего заявок: {stats['total']}\n"
+            f"Новых: {stats['new']}\n"
+            f"Обработано: {stats['processed']}"
+        )
+    
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("process_"))
+async def process_callback_handler(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен")
+        return
+    
+    app_id = int(callback.data.split("_")[1])
+    db.update_status(app_id, "processed")
+    
+    await callback.answer("✅ Заявка отмечена как обработанная")
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.edit_text(f"{callback.message.text}\n\n✅ Обработано")
+
+@dp.callback_query(lambda c: c.data.startswith("view_"))
+async def view_callback_handler(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещен")
+        return
+    
+    app_id = int(callback.data.split("_")[1])
+    application = db.get_application_by_id(app_id)
+    
+    if application:
+        app_text = format_application(application, detailed=True)
+        await callback.message.answer(app_text)
+    
+    await callback.answer()
+
+# Вспомогательные функции
+def format_application(application, detailed=False):
+    app_id, user_id, username, full_name, contact_type, contact_data, app_type, message, date, time, created_at, status = application
+    
+    if date:
+        text = "📅 Встреча:\n\n"
+        text += f"🆔 {app_id}\n"
+        text += f"👤 {full_name}\n"
+        text += f"📅 {date}"
+        if time:
+            text += f" ⏰ {time}\n"
+        else:
+            text += "\n"
+        
+        contact_display = f"@{contact_data}" if contact_type == 'telegram' else contact_data
+        text += f"📞 {contact_display}\n"
+    else:
+        text = f"📋 Заявка #{app_id}\n\n"
+        text += f"👤 {full_name}\n"
+        text += f"📱 {contact_type}: {contact_data}\n"
+    
+    if detailed:
+        text += f"\n📝 Тип: {app_type}\n"
+        text += f"💬 Сообщение: {message}\n"
+        text += f"📅 Создана: {created_at}\n"
+        text += f"🔧 Статус: {status}\n"
+        text += f"🆔 ID пользователя: {user_id}\n"
+        text += f"👤 Username: @{username if username else 'не указан'}"
+    else:
+        text += f"\n📝 {app_type}\n"
+        text += f"💬 {message[:50]}..."
+    
+    return text
+
+async def send_applications_list(message: types.Message, applications, title):
+    if not applications:
+        await message.answer(f"{title}\n\n📭 Заявок нет")
+        return
+    
+    text = f"{title}\n\n"
+    
+    for i, app in enumerate(applications[:10], 1):
+        app_id, _, _, full_name, _, _, app_type, message, date, _, created_at, _ = app
+        
+        if date:
+            date_display = date
+            if app[9]:
+                date_display += f" {app[9]}"
+            
+            text += f"{i}. 🆔{app_id} 👤{full_name} 📅{date_display}\n"
+        else:
+            text += f"{i}. 🆔{app_id} 👤{full_name} 📝{app_type}\n"
+    
+    await message.answer(text)
+
+# Напоминания
 async def reminder_scheduler():
     while True:
         try:
@@ -416,11 +595,24 @@ async def reminder_scheduler():
                     except Exception as e:
                         logger.error(f"Ошибка отправки напоминания: {e}")
             
-            await asyncio.sleep(3600)
+            await asyncio.sleep(3600)  # Проверка каждый час
         except Exception as e:
             logger.error(f"Ошибка в планировщике: {e}")
             await asyncio.sleep(300)
 
-# Запуск планировщика
-async def start_scheduler():
+# Запуск бота
+async def main():
+    print("=" * 60)
+    print("🚀 БОТ КЛАССОНОЛАЙН ЗАПУЩЕН!")
+    print("=" * 60)
+    print(f"🤖 Бот: @CLA_on_bot")
+    print(f"👨‍💼 Админ ID: {ADMIN_ID}")
+    print("=" * 60)
+    
+    # Запуск планировщика напоминаний
     asyncio.create_task(reminder_scheduler())
+    
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
