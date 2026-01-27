@@ -1,5 +1,6 @@
 import sqlite3
-import os
+from datetime import datetime
+import pytz
 
 class Database:
     def __init__(self, db_name='bot.db'):
@@ -75,6 +76,13 @@ class Database:
         cursor.execute('UPDATE applications SET status = ? WHERE id = ?', (status, app_id))
         self.conn.commit()
     
+    def delete_application(self, app_id):
+        cursor = self.conn.cursor()
+        cursor.execute('DELETE FROM reminders WHERE application_id = ?', (app_id,))
+        cursor.execute('DELETE FROM applications WHERE id = ?', (app_id,))
+        self.conn.commit()
+        return cursor.rowcount
+    
     def get_stats(self):
         cursor = self.conn.cursor()
         cursor.execute('SELECT COUNT(*) FROM applications')
@@ -111,15 +119,6 @@ class Database:
         cursor = self.conn.cursor()
         cursor.execute('UPDATE reminders SET reminder_sent = 1 WHERE id = ?', (reminder_id,))
         self.conn.commit()
-
-    def delete_application(self, app_id):
-    """Удаление заявки по ID"""
-    cursor = self.conn.cursor()
-    cursor.execute('DELETE FROM reminders WHERE application_id = ?', (app_id,))
-    cursor.execute('DELETE FROM applications WHERE id = ?', (app_id,))
-    self.conn.commit()
-    return cursor.rowcount
-    
     
     def close(self):
         self.conn.close()
