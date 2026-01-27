@@ -111,6 +111,16 @@ class Database:
         cursor = self.conn.cursor()
         cursor.execute('UPDATE reminders SET reminder_sent = 1 WHERE id = ?', (reminder_id,))
         self.conn.commit()
+
+    def delete_application(self, app_id):
+    """Удаление заявки по ID"""
+    cursor = self.conn.cursor()
+    cursor.execute('DELETE FROM reminders WHERE application_id = ?', (app_id,))
+    cursor.execute('DELETE FROM applications WHERE id = ?', (app_id,))
+    self.conn.commit()
+    return cursor.rowcount
+    
     
     def close(self):
         self.conn.close()
+
