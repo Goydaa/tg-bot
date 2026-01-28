@@ -110,7 +110,8 @@ def get_admin_main_keyboard():
         [InlineKeyboardButton(text="📋 Новые заявки", callback_data="admin_new")],
         [InlineKeyboardButton(text="📊 Все заявки", callback_data="admin_all")],
         [InlineKeyboardButton(text="📈 Статистика", callback_data="admin_stats")],
-        [InlineKeyboardButton(text="🔍 Поиск заявки", callback_data="admin_search")]
+        [InlineKeyboardButton(text="🔍 Поиск заявки", callback_data="admin_search")],
+        [InlineKeyboardButton(text="⏰ Проверить напоминания", callback_data="admin_check_reminders")]
     ])
 
 @dp.message(Command("start"))
@@ -143,6 +144,7 @@ async def cmd_help(message: types.Message):
             "/view_all - Все заявки\n"
             "/stats_full - Полная статистика\n"
             "/search [ID] - Найти заявку по ID\n"
+            "/check_reminders - Проверить напоминания\n"
         )
     
     await message.answer(help_text)
@@ -167,6 +169,37 @@ async def cmd_admin(message: types.Message):
         )
     else:
         await message.answer("⛔ У вас нет доступа к админ-панели")
+
+@dp.message(Command("check_reminders"))
+async def cmd_check_reminders(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Доступ запрещен")
+        return
+    
+    reminders = db.get_due_reminders()
+    
+    if reminders:
+        text = "⏰ НАПОМИНАНИЯ ДЛЯ ОТПРАВКИ:\n\n"
+        for i, reminder in enumerate(reminders[:10], 1):
+            app_id, reminder_id, user_id, username = reminder[0], reminder[1], reminder[2], reminder[3]
+            application = db.get_application_by_id(app_id)
+            
+            if application:
+                date_display = datetime.strptime(application[8], '%Y-%m-%d').strftime('%d.%m.%Y')
+                text += f"{i}. Заявка #{app_id} | 👤 {application[3]} | 📅 {date_display}\n"
+        
+        if len(reminders) > 10:
+            text += f"\n... и еще {len(reminders) - 10} напоминаний"
+        
+        text += f"\n\nВсего: {len(reminders)} напоминаний"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Отправить все напоминания", callback_data="admin_send_all_reminders")]
+        ])
+        
+        await message.answer(text, reply_markup=keyboard)
+    else:
+        await message.answer("✅ Нет напоминаний для отправки")
 
 @dp.message(Command("applications"))
 async def cmd_applications(message: types.Message):
@@ -582,6 +615,37 @@ async def admin_callback_handler(callback: types.CallbackQuery):
     elif action == "admin_search":
         await callback.message.answer("Введите ID заявки для поиска:\nПример: /search 123")
     
+    elif action == "admin_check_reminders":
+        await cmd_check_reminders(callback.message)
+    
+    elif action == "admin_send_all_reminders":
+        reminders = db.get_due_reminders()
+        if reminders:
+            sent_count = 0
+            for reminder in reminders:
+                app_id, reminder_id, user_id, username = reminder[0], reminder[1], reminder[2], reminder[3]
+                
+                application = db.get_application_by_id(app_id)
+                if application:
+                    date_display = datetime.strptime(application[8], '%Y-%m-%d').strftime('%d.%m.%Y')
+                    reminder_text = f"🔔 НАПОМИНАНИЕ!\n\nУ вас запланирована встреча завтра ({date_display})"
+                    
+                    if application[9]:
+                        reminder_text += f" в {application[9]}"
+                    
+                    reminder_text += "\n\nНе забудьте подготовиться!"
+                    
+                    try:
+                        await bot.send_message(user_id, reminder_text)
+                        db.mark_reminder_sent(reminder_id)
+                        sent_count += 1
+                    except Exception as e:
+                        print(f"❌ Ошибка отправки напоминания пользователю {user_id}: {e}")
+            
+            await callback.message.answer(f"✅ Отправлено {sent_count} напоминаний из {len(reminders)}")
+        else:
+            await callback.message.answer("✅ Нет напоминаний для отправки")
+    
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("process_"))
@@ -622,202 +686,4 @@ async def delete_callback_handler(callback: types.CallbackQuery):
         await callback.answer("⛔ Доступ запрещен")
         return
     
-    app_id = int(callback.data.split("_")[1])
-    
-    # Создаем клавиатуру подтверждения удаления
-    confirm_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"confirm_delete_{app_id}"),
-            InlineKeyboardButton(text="❌ Нет, отмена", callback_data=f"cancel_delete_{app_id}")
-        ]
-    ])
-    
-    # Получаем информацию о заявке
-    application = db.get_application_by_id(app_id)
-    if application:
-        app_info = f"Заявка #{app_id}\n👤 {application[3]}\n📅 {application[8] if application[8] else 'Без даты'}"
-        await callback.message.answer(
-            f"🗑️ Вы уверены, что хотите удалить эту заявку?\n\n{app_info}",
-            reply_markup=confirm_keyboard
-        )
-    
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data.startswith("confirm_delete_"))
-async def confirm_delete_handler(callback: types.CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен")
-        return
-    
-    app_id = int(callback.data.split("_")[2])
-    
-    # Удаляем заявку
-    deleted_count = db.delete_application(app_id)
-    
-    if deleted_count > 0:
-        await callback.message.edit_text(f"✅ Заявка #{app_id} успешно удалена")
-        await callback.message.edit_reply_markup(reply_markup=None)
-        await callback.answer("✅ Заявка удалена")
-    else:
-        await callback.answer("❌ Заявка не найдена")
-
-@dp.callback_query(lambda c: c.data.startswith("cancel_delete_"))
-async def cancel_delete_handler(callback: types.CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен")
-        return
-    
-    app_id = int(callback.data.split("_")[2])
-    
-    # Возвращаемся к обычной клавиатуре
-    application = db.get_application_by_id(app_id)
-    if application:
-        app_text = format_application_detailed(application)
-        keyboard = get_admin_applications_keyboard(app_id)
-        await callback.message.edit_text(app_text)
-        await callback.message.edit_reply_markup(keyboard)
-    
-    await callback.answer("❌ Удаление отменено")
-
-@dp.callback_query(lambda c: c.data.startswith("message_"))
-async def message_callback_handler(callback: types.CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен")
-        return
-    
-    app_id = int(callback.data.split("_")[1])
-    application = db.get_application_by_id(app_id)
-    
-    if application:
-        user_id = application[1]
-        await callback.message.answer(
-            f"📞 Контакт пользователя для заявки #{app_id}:\n"
-            f"ID: {user_id}\n"
-            f"Username: @{application[2] if application[2] else 'не указан'}\n"
-            f"Телефон: {application[5] if application[4] == 'phone' else 'не указан'}\n"
-            f"Email: {application[5] if application[4] == 'email' else 'не указан'}\n"
-            f"Telegram: @{application[5] if application[4] == 'telegram' else 'не указан'}"
-        )
-    
-    await callback.answer()
-
-def format_application_short(application):
-    app_id, _, _, full_name, contact_type, contact_data, app_type, _, date, time, _, status = application
-    
-    text = f"🆔 {app_id} | 👤 {full_name}"
-    
-    if date:
-        date_display = datetime.strptime(date, '%Y-%m-%d').strftime('%d.%m')
-        text += f" | 📅 {date_display}"
-        if time:
-            text += f" {time}"
-    
-    text += f" | 📝 {app_type}"
-    text += f" | 🔧 {status}"
-    
-    return text
-
-def format_application_detailed(application):
-    app_id, user_id, username, full_name, contact_type, contact_data, app_type, message, date, time, created_at, status = application
-    
-    text = "📋 ПОДРОБНАЯ ИНФОРМАЦИЯ О ЗАЯВКЕ\n\n"
-    text += f"🆔 ID заявки: {app_id}\n"
-    text += f"👤 Полное имя: {full_name}\n"
-    text += f"📱 Способ связи: {contact_type}\n"
-    text += f"📞 Контактные данные: {contact_data}\n"
-    text += f"📝 Тип обращения: {app_type}\n"
-    text += f"💬 Сообщение: {message}\n"
-    
-    if date:
-        date_display = datetime.strptime(date, '%Y-%m-%d').strftime('%d.%m.%Y')
-        text += f"📅 Дата встречи: {date_display}\n"
-        if time:
-            text += f"⏰ Время встречи: {time}\n"
-    
-    text += f"📅 Дата создания: {created_at}\n"
-    text += f"🔧 Статус: {status}\n"
-    text += f"👤 ID пользователя: {user_id}\n"
-    text += f"🤖 Username: @{username if username else 'не указан'}\n\n"
-    
-    if contact_type == 'telegram' and contact_data:
-        text += f"📨 Написать в Telegram: @{contact_data}\n"
-    
-    return text
-
-async def send_applications_summary(message: types.Message, applications):
-    new_apps = [app for app in applications if app[11] == 'new']
-    processed_apps = [app for app in applications if app[11] == 'processed']
-    
-    text = "📊 СВОДКА ПО ВСЕМ ЗАЯВКАМ\n\n"
-    text += f"🆕 Новых: {len(new_apps)}\n"
-    text += f"✅ Обработанных: {len(processed_apps)}\n"
-    text += f"📈 Всего: {len(applications)}\n\n"
-    
-    if new_apps:
-        text += "🆕 ПОСЛЕДНИЕ НОВЫЕ ЗАЯВКИ:\n"
-        for app in new_apps[:3]:
-            text += f"• {format_application_short(app)}\n"
-    
-    if processed_apps:
-        text += "\n✅ ПОСЛЕДНИЕ ОБРАБОТАННЫЕ ЗАЯВКИ:\n"
-        for app in processed_apps[:3]:
-            text += f"• {format_application_short(app)}\n"
-    
-    await message.answer(text)
-
-async def reminder_scheduler():
-    print("⏰ Система напоминаний запущена")
-    while True:
-        try:
-            reminders = db.get_due_reminders()
-            
-            if reminders:
-                print(f"🔔 Найдено напоминаний для отправки: {len(reminders)}")
-            
-            for reminder in reminders:
-                app_id, reminder_id, user_id, username = reminder[0], reminder[1], reminder[2], reminder[3]
-                
-                application = db.get_application_by_id(app_id)
-                if application:
-                    date_display = datetime.strptime(application[8], '%Y-%m-%d').strftime('%d.%m.%Y')
-                    reminder_text = f"🔔 НАПОМИНАНИЕ!\n\n"
-                    reminder_text += f"У вас запланирована встреча завтра ({date_display})"
-                    
-                    if application[9]:
-                        reminder_text += f" в {application[9]}"
-                    
-                    reminder_text += "\n\nНе забудьте подготовиться!"
-                    
-                    try:
-                        await bot.send_message(user_id, reminder_text)
-                        db.mark_reminder_sent(reminder_id)
-                        print(f"✅ Напоминание отправлено пользователю {user_id} (заявка #{app_id})")
-                    except Exception as e:
-                        print(f"❌ Ошибка отправки напоминания пользователю {user_id}: {e}")
-            
-            await asyncio.sleep(3600)
-            
-        except Exception as e:
-            print(f"❌ Ошибка в планировщике напоминаний: {e}")
-            await asyncio.sleep(300)
-
-async def main():
-    print("=" * 60)
-    print("🚀 БОТ КЛАССОНОЛАЙН ЗАПУЩЕН!")
-    print("=" * 60)
-    print(f"🤖 Бот: @CLA_on_bot")
-    print(f"👨‍💼 Админ ID: {ADMIN_ID}")
-    print("=" * 60)
-    print("⏰ Запуск системы напоминаний...")
-    
-    asyncio.create_task(reminder_scheduler())
-    
-    print("✅ Бот готов к работе!")
-    print("📱 Отправьте /start в Telegram")
-    print("👨‍💼 Для админа: /admin")
-    print("=" * 60)
-    
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    app_id = int(callback.data.split("_")[
