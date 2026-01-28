@@ -9,6 +9,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 from datetime import datetime
 import os
 from dotenv import load_dotenv
+from aiohttp import web
 
 from database import Database
 from utils import validate_email, validate_phone, validate_telegram_username, validate_date, validate_time, get_next_dates, get_time_slots
@@ -722,6 +723,12 @@ async def admin_callback_handler(callback: types.CallbackQuery):
         reminders = db.get_due_reminders()
         if reminders:
             sent_count = 0
+            failed_count = 0
+            failed_list = []
+            
+           
+            await callback.message.answer(f"⏳ Начинаю отправку {len(reminders)} напоминаний...")
+            
             for reminder in reminders:
                 app_id, reminder_id, user_id, username = reminder[0], reminder[1], reminder[2], reminder[3]
                 
@@ -736,13 +743,51 @@ async def admin_callback_handler(callback: types.CallbackQuery):
                     reminder_text += "\n\nНе забудьте подготовиться!"
                     
                     try:
+                        
                         await bot.send_message(user_id, reminder_text)
                         db.mark_reminder_sent(reminder_id)
                         sent_count += 1
+                        print(f"✅ Напоминание #{reminder_id} отправлено пользователю {user_id}")
+                        
                     except Exception as e:
-                        print(f"❌ Ошибка отправки напоминания пользователю {user_id}: {e}")
+                        failed_count += 1
+                        error_msg = str(e)
+                        
+                        
+                        if "bot was blocked by the user" in error_msg.lower():
+                            failed_list.append(f"Заявка #{app_id} - Пользователь заблокировал бота")
+                            print(f"❌ Пользователь {user_id} заблокировал бота")
+                        elif "chat not found" in error_msg.lower():
+                            failed_list.append(f"Заявка #{app_id} - Пользователь не начинал диалог с ботом")
+                            print(f"❌ Пользователь {user_id} не начинал диалог с ботом")
+                        elif "user is deactivated" in error_msg.lower():
+                            failed_list.append(f"Заявка #{app_id} - Аккаунт пользователя удален")
+                            print(f"❌ Аккаунт пользователя {user_id} удален")
+                        else:
+                            failed_list.append(f"Заявка #{app_id} - {error_msg[:50]}")
+                            print(f"❌ Ошибка отправки пользователю {user_id}: {error_msg}")
             
-            await callback.message.answer(f"✅ Отправлено {sent_count} напоминаний из {len(reminders)}")
+            
+            report = f"📊 ОТЧЕТ ОТПРАВКИ НАПОМИНАНИЙ\n\n"
+            report += f"✅ Успешно отправлено: {sent_count}\n"
+            report += f"❌ Не удалось отправить: {failed_count}\n"
+            report += f"📋 Всего обработано: {len(reminders)}\n"
+            
+            if failed_list:
+                report += f"\n📝 Ошибки ({min(len(failed_list), 5)} из {len(failed_list)}):\n"
+                for i, error in enumerate(failed_list[:5], 1):
+                    report += f"{i}. {error}\n"
+                
+                if len(failed_list) > 5:
+                    report += f"... и еще {len(failed_list) - 5} ошибок"
+            
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Проверить напоминания", callback_data="admin_check_reminders")]
+            ])
+            
+            await callback.message.answer(report, reply_markup=keyboard)
+            
         else:
             await callback.message.answer("✅ Нет напоминаний для отправки")
     
@@ -807,9 +852,50 @@ async def message_callback_handler(callback: types.CallbackQuery):
     
     await callback.answer()
 
+async def health_check(request):
+    """Простой healthcheck для Railway"""
+    return web.Response(text="Bot is running")
+
+async def start_http_server():
+    """Запуск простого HTTP сервера для healthcheck"""
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    app.router.add_get('/health', health_check)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    
+    print(f"✅ HTTP сервер запущен на порту {port}")
+    return runner
+
 async def main():
-    print("Бот запущен...")
-    await dp.start_polling(bot)
+    print("🚀 Бот запускается...")
+    print(f"✅ ADMIN_ID корректный: {ADMIN_ID}")
+    
+   
+    http_server = await start_http_server()
+    
+  
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        print("✅ Вебхук удален")
+    except Exception as e:
+        print(f"ℹ️ Ошибка при удалении вебхука: {e}")
+    
+    
+    print("📡 Запускаем polling бота...")
+    
+    try:
+        await dp.start_polling(bot)
+    except Exception as e:
+        print(f"❌ Ошибка при запуске бота: {e}")
+    finally:
+        
+        await http_server.cleanup()
 
 if __name__ == "__main__":
     asyncio.run(main())
