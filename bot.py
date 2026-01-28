@@ -15,11 +15,16 @@ from utils import validate_email, validate_phone, validate_telegram_username, va
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Отладочный вывод
+print("=" * 50)
+print(f"BOT_TOKEN: {'установлен' if os.getenv('BOT_TOKEN') else 'НЕ УСТАНОВЛЕН!'}")
+print(f"ADMIN_ID из env: {os.getenv('ADMIN_ID')}")
+print("=" * 50)
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = int(os.getenv('ADMIN_ID', '0'))
+
+print(f"DEBUG: FINAL ADMIN_ID = {ADMIN_ID}")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -153,40 +158,6 @@ def format_application_detailed(app):
     
     return text
 
-def send_applications_summary(message, applications):
-    new_apps = []
-    processed_apps = []
-    
-    for app in applications:
-        if app[11] == 'new':
-            new_apps.append(app)
-        else:
-            processed_apps.append(app)
-    
-    text = "📋 ВСЕ ЗАЯВКИ\n\n"
-    
-    if new_apps:
-        text += f"🆕 НОВЫЕ ({len(new_apps)}):\n"
-        for i, app in enumerate(new_apps[:5], 1):
-            app_text = format_application_short(app)
-            text += f"{i}. {app_text}\n"
-        
-        if len(new_apps) > 5:
-            text += f"... и еще {len(new_apps) - 5} новых заявок\n"
-    
-    if processed_apps:
-        text += f"\n✅ ОБРАБОТАННЫЕ ({len(processed_apps)}):\n"
-        for i, app in enumerate(processed_apps[:5], 1):
-            app_text = format_application_short(app)
-            text += f"{i}. {app_text}\n"
-        
-        if len(processed_apps) > 5:
-            text += f"... и еще {len(processed_apps) - 5} обработанных заявок\n"
-    
-    text += f"\n📊 Итого: {len(new_apps)} новых, {len(processed_apps)} обработанных"
-    
-    return text
-
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
@@ -226,7 +197,7 @@ async def cmd_help(message: types.Message):
 async def cmd_stats(message: types.Message):
     stats = db.get_stats()
     await message.answer(
-        f"📊 Статистика заявки:\n\n"
+        f"📊 Статистика заявок:\n\n"
         f"Всего заявок: {stats['total']}\n"
         f"Новых: {stats['new']}\n"
         f"Обработано: {stats['processed']}"
@@ -234,6 +205,7 @@ async def cmd_stats(message: types.Message):
 
 @dp.message(Command("admin"))
 async def cmd_admin(message: types.Message):
+    print(f"DEBUG admin command: user_id={message.from_user.id}, ADMIN_ID={ADMIN_ID}")
     if message.from_user.id == ADMIN_ID:
         await message.answer(
             "👨‍💼 Панель администратора\n\n"
@@ -245,6 +217,7 @@ async def cmd_admin(message: types.Message):
 
 @dp.message(Command("check_reminders"))
 async def cmd_check_reminders(message: types.Message):
+    print(f"DEBUG check_reminders: user_id={message.from_user.id}, ADMIN_ID={ADMIN_ID}")
     if message.from_user.id != ADMIN_ID:
         await message.answer("⛔ Доступ запрещен")
         return
@@ -305,7 +278,38 @@ async def cmd_view_all(message: types.Message):
         await message.answer("📭 Нет заявок в базе данных")
         return
     
-    await message.answer(send_applications_summary(message, applications))
+    new_apps = []
+    processed_apps = []
+    
+    for app in applications:
+        if app[11] == 'new':
+            new_apps.append(app)
+        else:
+            processed_apps.append(app)
+    
+    text = "📋 ВСЕ ЗАЯВКИ\n\n"
+    
+    if new_apps:
+        text += f"🆕 НОВЫЕ ({len(new_apps)}):\n"
+        for i, app in enumerate(new_apps[:5], 1):
+            app_text = format_application_short(app)
+            text += f"{i}. {app_text}\n"
+        
+        if len(new_apps) > 5:
+            text += f"... и еще {len(new_apps) - 5} новых заявок\n"
+    
+    if processed_apps:
+        text += f"\n✅ ОБРАБОТАННЫЕ ({len(processed_apps)}):\n"
+        for i, app in enumerate(processed_apps[:5], 1):
+            app_text = format_application_short(app)
+            text += f"{i}. {app_text}\n"
+        
+        if len(processed_apps) > 5:
+            text += f"... и еще {len(processed_apps) - 5} обработанных заявок\n"
+    
+    text += f"\n📊 Итого: {len(new_apps)} новых, {len(processed_apps)} обработанных"
+    
+    await message.answer(text)
 
 @dp.message(Command("search"))
 async def cmd_search(message: types.Message):
@@ -613,7 +617,7 @@ async def notify_admin(app_id, user_data, message_text):
         keyboard = get_admin_applications_keyboard(app_id)
         await bot.send_message(ADMIN_ID, admin_text, reply_markup=keyboard)
     except Exception as e:
-        logger.error(f"Ошибка при отправке уведомления админу: {e}")
+        print(f"Ошибка при отправке уведомления админу: {e}")
 
 @dp.message(F.text == "📊 Статистика")
 async def show_stats_button(message: types.Message):
@@ -621,6 +625,7 @@ async def show_stats_button(message: types.Message):
 
 @dp.callback_query(lambda c: c.data.startswith("admin_"))
 async def admin_callback_handler(callback: types.CallbackQuery):
+    print(f"DEBUG admin_callback: user_id={callback.from_user.id}, ADMIN_ID={ADMIN_ID}")
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Доступ запрещен")
         return
@@ -641,7 +646,37 @@ async def admin_callback_handler(callback: types.CallbackQuery):
     elif action == "admin_all":
         applications = db.get_all_applications()
         if applications:
-            text = send_applications_summary(callback.message, applications)
+            new_apps = []
+            processed_apps = []
+            
+            for app in applications:
+                if app[11] == 'new':
+                    new_apps.append(app)
+                else:
+                    processed_apps.append(app)
+            
+            text = "📋 ВСЕ ЗАЯВКИ\n\n"
+            
+            if new_apps:
+                text += f"🆕 НОВЫЕ ({len(new_apps)}):\n"
+                for i, app in enumerate(new_apps[:5], 1):
+                    app_text = format_application_short(app)
+                    text += f"{i}. {app_text}\n"
+                
+                if len(new_apps) > 5:
+                    text += f"... и еще {len(new_apps) - 5} новых заявок\n"
+            
+            if processed_apps:
+                text += f"\n✅ ОБРАБОТАННЫЕ ({len(processed_apps)}):\n"
+                for i, app in enumerate(processed_apps[:5], 1):
+                    app_text = format_application_short(app)
+                    text += f"{i}. {app_text}\n"
+                
+                if len(processed_apps) > 5:
+                    text += f"... и еще {len(processed_apps) - 5} обработанных заявок\n"
+            
+            text += f"\n📊 Итого: {len(new_apps)} новых, {len(processed_apps)} обработанных"
+            
             await callback.message.answer(text)
         else:
             await callback.message.answer("📭 Нет заявок")
@@ -659,7 +694,29 @@ async def admin_callback_handler(callback: types.CallbackQuery):
         await callback.message.answer("Введите ID заявки для поиска:\nПример: /search 123")
     
     elif action == "admin_check_reminders":
-        await cmd_check_reminders(callback.message)
+        reminders = db.get_due_reminders()
+        if reminders:
+            text = "⏰ НАПОМИНАНИЯ ДЛЯ ОТПРАВКИ:\n\n"
+            for i, reminder in enumerate(reminders[:10], 1):
+                app_id, reminder_id, user_id, username = reminder[0], reminder[1], reminder[2], reminder[3]
+                application = db.get_application_by_id(app_id)
+                
+                if application:
+                    date_display = datetime.strptime(application[8], '%Y-%m-%d').strftime('%d.%m.%Y')
+                    text += f"{i}. Заявка #{app_id} | 👤 {application[3]} | 📅 {date_display}\n"
+            
+            if len(reminders) > 10:
+                text += f"\n... и еще {len(reminders) - 10} напоминаний"
+            
+            text += f"\n\nВсего: {len(reminders)} напоминаний"
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Отправить все напоминания", callback_data="admin_send_all_reminders")]
+            ])
+            
+            await callback.message.answer(text, reply_markup=keyboard)
+        else:
+            await callback.message.answer("✅ Нет напоминаний для отправки")
     
     elif action == "admin_send_all_reminders":
         reminders = db.get_due_reminders()
@@ -747,7 +804,6 @@ async def message_callback_handler(callback: types.CallbackQuery):
     if application:
         user_id = application[1]
         await callback.message.answer(f"Напишите сообщение для пользователя (ID: {user_id}):")
-        # Здесь можно реализовать сохранение состояния для отправки сообщения
     
     await callback.answer()
 
