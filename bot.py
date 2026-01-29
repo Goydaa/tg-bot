@@ -10,7 +10,7 @@ import os
 from dotenv import load_dotenv
 
 from database import Database
-from utils import validate_telegram_username, validate_date, validate_time, get_next_dates, get_time_slots
+from utils import validate_telegram_username, get_next_dates, get_time_slots
 
 load_dotenv()
 
@@ -152,15 +152,20 @@ async def date_handler(message: types.Message, state: FSMContext):
         return
     
     try:
+        # Конвертируем из формата дд.мм.гггг в гггг-мм-дд
         date_obj = datetime.strptime(message.text, '%d.%m.%Y')
         date_str = date_obj.strftime('%Y-%m-%d')
-        if not validate_date(date_str):
-            raise ValueError
+        
+        # Проверяем, что дата не в прошлом
+        if date_obj.date() < datetime.now().date():
+            await message.answer("❌ Дата уже прошла", reply_markup=date_kb())
+            return
+            
         await state.update_data(date=date_str)
         await state.set_state(States.time)
         await message.answer("⏰ Выберите время:", reply_markup=time_kb())
     except:
-        await message.answer("❌ Неверная дата", reply_markup=date_kb())
+        await message.answer("❌ Неверный формат даты\nПример: 30.01.2026", reply_markup=date_kb())
 
 @dp.message(States.time)
 async def time_handler(message: types.Message, state: FSMContext):
@@ -172,8 +177,11 @@ async def time_handler(message: types.Message, state: FSMContext):
     if message.text == "❌ Без времени":
         await state.update_data(time=None)
     else:
-        if not validate_time(message.text):
-            await message.answer("❌ Неверное время", reply_markup=time_kb())
+        # Простая проверка формата времени
+        try:
+            datetime.strptime(message.text, '%H:%M')
+        except:
+            await message.answer("❌ Неверное время\nПример: 14:00", reply_markup=time_kb())
             return
         await state.update_data(time=message.text)
     
@@ -337,3 +345,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
