@@ -89,8 +89,8 @@ def get_admin_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Новые заявки", callback_data="admin_new")],
         [InlineKeyboardButton(text="📊 Все заявки", callback_data="admin_all")],
-        [InlineKeyboardButton(text="📈 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="🔍 Поиск заявки", callback_data="admin_search")],
+        [InlineKeyboardButton(text="📈 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="⏰ Проверить напоминания", callback_data="admin_check_reminders")]
     ])
 
@@ -105,7 +105,7 @@ async def cmd_start(message: types.Message):
 async def cmd_help(message: types.Message):
     help_text = "/start - Начать\n/help - Справка\n/stats - Статистика\n/cancel - Отмена\n"
     if message.from_user.id == ADMIN_ID:
-        help_text += "\nАдмин:\n/admin\n/applications\n/view_all\n/search [ID]\n/check_reminders\n/test_reminder"
+        help_text += "\nАдмин:\n/admin\n/applications\n/view_all\n/search [ID или имя]\n/check_reminders\n/test_reminder"
     await message.answer(help_text)
 
 @dp.message(Command("stats"))
@@ -150,6 +150,120 @@ async def cmd_check_reminders(message: types.Message):
         [InlineKeyboardButton(text="✅ Отправить все", callback_data="admin_send_all_reminders")]
     ])
     await message.answer(text, reply_markup=keyboard)
+
+@dp.message(Command("search"))
+async def cmd_search(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа")
+        return
+    
+    args = message.text.split(maxsplit=1)
+    
+    if len(args) < 2:
+        await message.answer("❌ Укажите ID или имя для поиска\n\n"
+                           "Примеры:\n"
+                           "`/search 3` - найти заявку #3\n"
+                           "`/search антон` - найти по имени\n"
+                           "`/search кипиток` - найти по username\n"
+                           "`/search @SeregaKipitok` - найти по @username", 
+                           parse_mode="Markdown")
+        return
+    
+    search_query = args[1].strip().lower()
+    
+    # Получаем ВСЕ заявки для поиска
+    all_applications = db.get_all_applications()
+    
+    if not all_applications:
+        await message.answer("📭 Нет заявок в базе")
+        return
+    
+    # Ищем совпадения
+    found_apps = []
+    
+    for app in all_applications:
+        app_id, user_id, username, full_name, contact_type, contact_data, app_type, message_text, appointment_date, appointment_time, created_at, status = app
+        
+        # Поиск по ID
+        if search_query.isdigit() and int(search_query) == app_id:
+            found_apps.append(app)
+            continue
+        
+        # Поиск по имени (без учета регистра)
+        if search_query in full_name.lower():
+            found_apps.append(app)
+            continue
+        
+        # Поиск по username (без @)
+        clean_username = (username or "").lower().replace('@', '')
+        clean_search = search_query.replace('@', '')
+        if clean_search in clean_username:
+            found_apps.append(app)
+            continue
+        
+        # Поиск по contact_data (telegram username)
+        if contact_type == 'telegram' and search_query.replace('@', '') in contact_data.lower():
+            found_apps.append(app)
+            continue
+        
+        # Поиск по сообщению
+        if search_query in message_text.lower():
+            found_apps.append(app)
+            continue
+    
+    if not found_apps:
+        await message.answer(f"❌ Ничего не найдено по запросу: '{search_query}'")
+        return
+    
+    if len(found_apps) == 1:
+        # Показываем одну найденную заявку полностью
+        app = found_apps[0]
+        app_id, user_id, username, full_name, contact_type, contact_data, app_type, message_text, appointment_date, appointment_time, created_at, status = app
+        
+        text = f"🔍 НАЙДЕНА ЗАЯВКА #{app_id}\n\n"
+        text += f"👤 Имя: {full_name}\n"
+        text += f"👤 TG: @{username if username else 'не указан'}\n"
+        text += f"🆔 TG ID: {user_id}\n"
+        text += f"📱 Контакт ({contact_type}): {contact_data}\n"
+        text += f"📋 Тип: {app_type}\n"
+        
+        if appointment_date:
+            date_display = datetime.strptime(appointment_date, '%Y-%m-%d').strftime('%d.%m.%Y')
+            text += f"📅 Дата: {date_display}\n"
+            if appointment_time:
+                text += f"⏰ Время: {appointment_time}\n"
+        
+        text += f"💬 Сообщение:\n{message_text}\n\n"
+        text += f"📅 Создана: {created_at}\n"
+        text += f"📊 Статус: {status}\n"
+        
+        keyboard = get_admin_applications_keyboard(app_id)
+        await message.answer(text, reply_markup=keyboard)
+    
+    else:
+        # Показываем список найденных заявок
+        text = f"🔍 Найдено заявок: {len(found_apps)}\n\n"
+        
+        for i, app in enumerate(found_apps[:10], 1):
+            app_id, user_id, username, full_name, contact_type, contact_data, app_type, message_text, appointment_date, appointment_time, created_at, status = app
+            
+            text += f"{i}. #{app_id} | {full_name} | {status.upper()}\n"
+            
+            if appointment_date:
+                date_display = datetime.strptime(appointment_date, '%Y-%m-%d').strftime('%d.%m')
+                text += f"   📅 {date_display}"
+                if appointment_time:
+                    text += f" ⏰ {appointment_time}"
+                text += "\n"
+            
+            text += f"   💬 {message_text[:30]}...\n\n"
+        
+        if len(found_apps) > 10:
+            text += f"... и еще {len(found_apps) - 10} заявок\n"
+        
+        text += f"\n📌 Для просмотра конкретной заявки используй:\n`/search [ID]`"
+        
+        await message.answer(text, parse_mode="Markdown")
 
 @dp.message(F.text.in_(["📝 Запись на занятие", "❓ Вопрос по курсу", "📋 Прочее"]))
 async def process_application_type(message: types.Message, state: FSMContext):
@@ -374,7 +488,7 @@ async def admin_callback_handler(callback: types.CallbackQuery):
         await callback.message.answer(f"📊 Всего: {stats['total']}\nНовых: {stats['new']}\nОбработано: {stats['processed']}")
     
     elif action == "admin_search":
-        await callback.message.answer("Введите: /search [ID]")
+        await callback.message.answer("🔍 Введите ID или имя для поиска:\n\nПримеры:\n`/search 3` - по ID\n`/search антон` - по имени\n`/search кипиток` - по username", parse_mode="Markdown")
     
     elif action == "admin_check_reminders":
         reminders = db.get_due_reminders()
