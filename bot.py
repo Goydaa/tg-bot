@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from aiohttp import web
 
 from database import Database
-from utils import validate_email, validate_phone, validate_telegram_username, validate_date, validate_time, get_next_dates, get_time_slots
+from utils import validate_telegram_username, validate_date, validate_time, get_next_dates, get_time_slots
 
 load_dotenv()
 
@@ -25,7 +25,6 @@ db = Database()
 class ApplicationStates(StatesGroup):
     waiting_for_type = State()
     waiting_for_name = State()
-    waiting_for_contact_type = State()
     waiting_for_contact = State()
     waiting_for_message = State()
     waiting_for_date = State()
@@ -37,13 +36,6 @@ def get_main_keyboard():
         [KeyboardButton(text="❓ Вопрос по курсу")],
         [KeyboardButton(text="📋 Прочее")],
         [KeyboardButton(text="📊 Статистика")]
-    ], resize_keyboard=True)
-
-def get_contact_type_keyboard():
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📧 Email")],
-        [KeyboardButton(text="📞 Телефон")],
-        [KeyboardButton(text="👤 Telegram")]
     ], resize_keyboard=True)
 
 def get_date_keyboard():
@@ -105,7 +97,7 @@ async def cmd_start(message: types.Message):
 async def cmd_help(message: types.Message):
     help_text = "/start - Начать\n/help - Справка\n/stats - Статистика\n/cancel - Отмена\n"
     if message.from_user.id == ADMIN_ID:
-        help_text += "\nАдмин:\n/admin\n/applications\n/view_all\n/search [ID или имя]\n/check_reminders\n/test_reminder"
+        help_text += "\nАдмин:\n/admin\n/applications\n/view_all\n/search [параметр]\n/check_reminders\n/test_reminder"
     await message.answer(help_text)
 
 @dp.message(Command("stats"))
@@ -157,17 +149,18 @@ async def cmd_search(message: types.Message):
         await message.answer("⛔ Нет доступа")
         return
     
-    args = message.text.split(maxsplit=1)
+    args = message.text.split(maxsplit=2)
     
-    if len(args) < 2:
-        await message.answer("❌ Укажите ID или имя для поиска\n\n"
+    if len(args) < 3:
+        await message.answer("❌ Формат: /search [тип] [значение]\n\n"
                            "Примеры:\n"
-                           "`/search 3` - найти заявку номер 3\n"
-                           "`/search антон` - найти все заявки Антона", 
+                           "`/search id 3` - найти заявку #3\n"
+                           "`/search name антон` - найти по имени", 
                            parse_mode="Markdown")
         return
     
-    search_query = args[1].strip().lower()
+    search_type = args[1].lower()
+    search_query = args[2].strip().lower()
     
     # Получаем ВСЕ заявки для поиска
     all_applications = db.get_all_applications()
@@ -176,29 +169,23 @@ async def cmd_search(message: types.Message):
         await message.answer("📭 Нет заявок в базе")
         return
     
-    # Ищем совпадения
     found_apps = []
     
     for app in all_applications:
         app_id, user_id, username, full_name, contact_type, contact_data, app_type, message_text, appointment_date, appointment_time, created_at, status = app
         
-        # Поиск по ID
-        if search_query.isdigit() and int(search_query) == app_id:
-            found_apps.append(app)
-            continue
+        if search_type == "id":
+            # Поиск по ID
+            if search_query.isdigit() and int(search_query) == app_id:
+                found_apps.append(app)
         
-        # Поиск по имени (без учета регистра)
-        if search_query in full_name.lower():
-            found_apps.append(app)
-            continue
-        
-        # Поиск по сообщению
-        if search_query in message_text.lower():
-            found_apps.append(app)
-            continue
+        elif search_type == "name":
+            # Поиск по имени
+            if search_query in full_name.lower():
+                found_apps.append(app)
     
     if not found_apps:
-        await message.answer(f"❌ Ничего не найдено по запросу: '{search_query}'")
+        await message.answer(f"❌ Не найдено по запросу: '{search_type} {search_query}'")
         return
     
     if len(found_apps) == 1:
@@ -210,7 +197,7 @@ async def cmd_search(message: types.Message):
         text += f"👤 Имя: {full_name}\n"
         text += f"👤 TG: @{username if username else 'не указан'}\n"
         text += f"🆔 TG ID: {user_id}\n"
-        text += f"📱 Контакт ({contact_type}): {contact_data}\n"
+        text += f"📱 Telegram: @{contact_data}\n"
         text += f"📋 Тип: {app_type}\n"
         
         if appointment_date:
@@ -247,9 +234,7 @@ async def cmd_search(message: types.Message):
         if len(found_apps) > 10:
             text += f"... и еще {len(found_apps) - 10} заявок\n"
         
-        text += f"\n📌 Для просмотра конкретной заявки используй:\n`/search [ID]`"
-        
-        await message.answer(text, parse_mode="Markdown")
+        await message.answer(text)
 
 @dp.message(F.text.in_(["📝 Запись на занятие", "❓ Вопрос по курсу", "📋 Прочее"]))
 async def process_application_type(message: types.Message, state: FSMContext):
@@ -268,30 +253,8 @@ async def process_name(message: types.Message, state: FSMContext):
         await cmd_cancel(message, state)
         return
     await state.update_data(full_name=message.text)
-    await state.set_state(ApplicationStates.waiting_for_contact_type)
-    await message.answer("📱 Способ связи:", reply_markup=get_contact_type_keyboard())
-
-@dp.message(ApplicationStates.waiting_for_contact_type)
-async def process_contact_type(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await cmd_cancel(message, state)
-        return
-    
-    contact_type_map = {"📧 Email": "email", "📞 Телефон": "phone", "👤 Telegram": "telegram"}
-    if message.text not in contact_type_map:
-        await message.answer("Выберите способ связи:", reply_markup=get_contact_type_keyboard())
-        return
-    
-    contact_type = contact_type_map[message.text]
-    await state.update_data(contact_type=contact_type)
     await state.set_state(ApplicationStates.waiting_for_contact)
-    
-    prompt_text = {
-        "email": "📧 Ваш email:",
-        "phone": "📞 Ваш телефон:",
-        "telegram": "👤 Ваш Telegram:"
-    }[contact_type]
-    await message.answer(prompt_text, reply_markup=get_cancel_keyboard())
+    await message.answer("👤 Ваш Telegram username (например: @username или просто username):", reply_markup=get_cancel_keyboard())
 
 @dp.message(ApplicationStates.waiting_for_contact)
 async def process_contact(message: types.Message, state: FSMContext):
@@ -300,24 +263,16 @@ async def process_contact(message: types.Message, state: FSMContext):
         return
     
     data = await state.get_data()
-    contact_type = data['contact_type']
     contact_data = message.text
     
-    is_valid = False
-    if contact_type == "email":
-        is_valid = validate_email(contact_data)
-        error_msg = "❌ Неверный email"
-    elif contact_type == "phone":
-        is_valid = validate_phone(contact_data)
-        error_msg = "❌ Неверный телефон"
-    else:
-        if contact_data.startswith('@'):
-            contact_data = contact_data[1:]
-        is_valid = validate_telegram_username(contact_data)
-        error_msg = "❌ Неверный Telegram"
+    # Убираем @ если есть
+    if contact_data.startswith('@'):
+        contact_data = contact_data[1:]
+    
+    is_valid = validate_telegram_username(contact_data)
     
     if not is_valid:
-        await message.answer(error_msg, reply_markup=get_cancel_keyboard())
+        await message.answer("❌ Неверный Telegram username. Используйте 5-32 символа (буквы, цифры, _):", reply_markup=get_cancel_keyboard())
         return
     
     await state.update_data(contact_data=contact_data)
@@ -391,7 +346,7 @@ async def process_message(message: types.Message, state: FSMContext):
         user_id=message.from_user.id,
         username=message.from_user.username or "",
         full_name=user_data['full_name'],
-        contact_type=user_data['contact_type'],
+        contact_type="telegram",
         contact_data=user_data['contact_data'],
         app_type=user_data['application_type'],
         message=message.text,
@@ -403,6 +358,7 @@ async def process_message(message: types.Message, state: FSMContext):
     try:
         admin_text = f"📝 НОВАЯ ЗАЯВКА #{app_id}\n"
         admin_text += f"👤 {user_data['full_name']}\n"
+        admin_text += f"📱 Telegram: @{user_data['contact_data']}\n"
         if user_data.get('appointment_date'):
             date_display = datetime.strptime(user_data['appointment_date'], '%Y-%m-%d').strftime('%d.%m.%Y')
             admin_text += f"📅 {date_display}"
@@ -418,6 +374,7 @@ async def process_message(message: types.Message, state: FSMContext):
     # Ответ пользователю
     confirmation = "✅ Заявка принята!\n\n"
     confirmation += f"👤 {user_data['full_name']}\n"
+    confirmation += f"📱 Telegram: @{user_data['contact_data']}\n"
     if user_data.get('appointment_date'):
         date_display = datetime.strptime(user_data['appointment_date'], '%Y-%m-%d').strftime('%d.%m.%Y')
         confirmation += f"📅 {date_display}\n"
@@ -474,7 +431,7 @@ async def admin_callback_handler(callback: types.CallbackQuery):
         await callback.message.answer(f"📊 Всего: {stats['total']}\nНовых: {stats['new']}\nОбработано: {stats['processed']}")
     
     elif action == "admin_search":
-        await callback.message.answer("🔍 Введите ID или имя для поиска:\n\nПримеры:\n`/search 3` - найти заявку номер 3\n`/search антон` - найти все заявки Антона", parse_mode="Markdown")
+        await callback.message.answer("🔍 Формат: /search [тип] [значение]\n\nПримеры:\n`/search id 3` - найти заявку #3\n`/search name антон` - найти по имени", parse_mode="Markdown")
     
     elif action == "admin_check_reminders":
         reminders = db.get_due_reminders()
@@ -562,7 +519,7 @@ async def details_callback_handler(callback: types.CallbackQuery):
     app_id = int(callback.data.split("_")[1])
     app = db.get_application_by_id(app_id)
     if app:
-        text = f"📋 #{app[0]}\n👤 {app[3]}\n📱 {app[5]}: {app[4]}\n📅 {app[8] or 'Нет'}\n⏰ {app[9] or 'Нет'}\n💬 {app[7]}\n📊 {app[11]}"
+        text = f"📋 #{app[0]}\n👤 {app[3]}\n📱 Telegram: @{app[4]}\n📅 {app[8] or 'Нет'}\n⏰ {app[9] or 'Нет'}\n💬 {app[7]}\n📊 {app[11]}"
         keyboard = get_admin_applications_keyboard(app_id)
         await callback.message.answer(text, reply_markup=keyboard)
     await callback.answer()
