@@ -488,7 +488,7 @@ async def admin_callback_handler(callback: types.CallbackQuery):
         await callback.message.answer(f"📊 Всего: {stats['total']}\nНовых: {stats['new']}\nОбработано: {stats['processed']}")
     
     elif action == "admin_search":
-        await callback.message.answer("🔍 Введите ID или имя для поиска:\n\nПримеры:\n`/search 3` - по ID\n`/search антон` - по имени\n`/search кипиток` - по username", parse_mode="Markdown")
+        await callback.message.answer("🔍 Введите ID или имя для поиска:\n\nПримеры:\n`/search 3` - по ID\n`/search "Имя"` - по имени\n`/search @username` - по username", parse_mode="Markdown")
     
     elif action == "admin_check_reminders":
         reminders = db.get_due_reminders()
@@ -647,3 +647,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
