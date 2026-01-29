@@ -1,6 +1,5 @@
 import sqlite3
 from datetime import datetime
-import pytz
 
 class Database:
     def __init__(self, db_name='applications.db'):
@@ -15,7 +14,6 @@ class Database:
                 user_id INTEGER,
                 username TEXT,
                 full_name TEXT,
-                contact_type TEXT,
                 contact_data TEXT,
                 app_type TEXT,
                 message TEXT,
@@ -25,95 +23,64 @@ class Database:
                 status TEXT DEFAULT 'new'
             )
         ''')
-        
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS reminders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 application_id INTEGER,
                 reminder_date TEXT,
-                sent INTEGER DEFAULT 0,
-                FOREIGN KEY (application_id) REFERENCES applications (id)
+                sent INTEGER DEFAULT 0
             )
         ''')
         self.conn.commit()
     
-    def add_application(self, user_id, username, full_name, contact_type, contact_data, 
-                       app_type, message, appointment_date=None, appointment_time=None):
+    def add_application(self, user_id, username, full_name, contact_data, app_type, message, appointment_date=None, appointment_time=None):
         try:
             self.cursor.execute('''
                 INSERT INTO applications 
-                (user_id, username, full_name, contact_type, contact_data, app_type, 
-                 message, appointment_date, appointment_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (user_id, username, full_name, contact_type, contact_data, 
-                  app_type, message, appointment_date, appointment_time))
-            self.conn.commit()
-            return self.cursor.lastrowid
-        except Exception as e:
-            print(f"Ошибка: {e}")
-            return None
-    
-    def add_reminder(self, application_id, reminder_date):
-        try:
-            self.cursor.execute('INSERT INTO reminders (application_id, reminder_date) VALUES (?, ?)', 
-                              (application_id, reminder_date))
+                (user_id, username, full_name, contact_data, app_type, message, appointment_date, appointment_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (user_id, username, full_name, contact_data, app_type, message, appointment_date, appointment_time))
             self.conn.commit()
             return self.cursor.lastrowid
         except:
             return None
     
-    def mark_reminder_sent(self, reminder_id):
+    def add_reminder(self, app_id, reminder_date):
         try:
-            self.cursor.execute("UPDATE reminders SET sent = 1 WHERE id = ?", (reminder_id,))
+            self.cursor.execute('INSERT INTO reminders (application_id, reminder_date) VALUES (?, ?)', (app_id, reminder_date))
             self.conn.commit()
-            return True
         except:
-            return False
+            pass
     
     def get_due_reminders(self):
         try:
             today = datetime.now().strftime('%Y-%m-%d')
-            self.cursor.execute(
-                """
-                SELECT applications.id, reminders.id, applications.user_id, applications.username 
-                FROM reminders 
-                JOIN applications ON reminders.application_id = applications.id 
-                WHERE reminders.reminder_date <= ? 
-                AND reminders.sent = 0
-                AND applications.appointment_date IS NOT NULL
-                """,
-                (today,)
-            )
+            self.cursor.execute('''
+                SELECT a.id, r.id, a.user_id, a.username 
+                FROM reminders r
+                JOIN applications a ON r.application_id = a.id
+                WHERE r.reminder_date <= ? AND r.sent = 0 AND a.appointment_date IS NOT NULL
+            ''', (today,))
             return self.cursor.fetchall()
         except:
             return []
     
     def get_applications(self, status='new'):
-        self.cursor.execute("SELECT * FROM applications WHERE status = ? ORDER BY created_at DESC", (status,))
+        self.cursor.execute('SELECT * FROM applications WHERE status = ? ORDER BY created_at DESC', (status,))
         return self.cursor.fetchall()
     
     def get_all_applications(self):
-        self.cursor.execute("SELECT * FROM applications ORDER BY created_at DESC")
+        self.cursor.execute('SELECT * FROM applications ORDER BY created_at DESC')
         return self.cursor.fetchall()
     
     def get_application_by_id(self, app_id):
-        self.cursor.execute("SELECT * FROM applications WHERE id = ?", (app_id,))
+        self.cursor.execute('SELECT * FROM applications WHERE id = ?', (app_id,))
         return self.cursor.fetchone()
     
-    def update_status(self, app_id, status):
-        self.cursor.execute("UPDATE applications SET status = ? WHERE id = ?", (status, app_id))
-        self.conn.commit()
-    
-    def delete_application(self, app_id):
-        self.cursor.execute("DELETE FROM reminders WHERE application_id = ?", (app_id,))
-        self.cursor.execute("DELETE FROM applications WHERE id = ?", (app_id,))
-        self.conn.commit()
-    
     def get_stats(self):
-        self.cursor.execute("SELECT COUNT(*) FROM applications")
+        self.cursor.execute('SELECT COUNT(*) FROM applications')
         total = self.cursor.fetchone()[0]
         self.cursor.execute("SELECT COUNT(*) FROM applications WHERE status = 'new'")
         new = self.cursor.fetchone()[0]
-        self.cursor.execute("SELECT COUNT(*) FROM applications WHERE status = 'processed'")
-        processed = self.cursor.fetchone()[0]
+        processed = total - new
         return {'total': total, 'new': new, 'processed': processed}
