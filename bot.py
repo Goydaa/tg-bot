@@ -162,10 +162,8 @@ async def cmd_search(message: types.Message):
     if len(args) < 2:
         await message.answer("❌ Укажите ID или имя для поиска\n\n"
                            "Примеры:\n"
-                           "`/search 3` - найти заявку #3\n"
-                           "`/search антон` - найти по имени\n"
-                           "`/search кипиток` - найти по username\n"
-                           "`/search @SeregaKipitok` - найти по @username", 
+                           "`/search 3` - найти заявку номер 3\n"
+                           "`/search антон` - найти все заявки Антона", 
                            parse_mode="Markdown")
         return
     
@@ -191,18 +189,6 @@ async def cmd_search(message: types.Message):
         
         # Поиск по имени (без учета регистра)
         if search_query in full_name.lower():
-            found_apps.append(app)
-            continue
-        
-        # Поиск по username (без @)
-        clean_username = (username or "").lower().replace('@', '')
-        clean_search = search_query.replace('@', '')
-        if clean_search in clean_username:
-            found_apps.append(app)
-            continue
-        
-        # Поиск по contact_data (telegram username)
-        if contact_type == 'telegram' and search_query.replace('@', '') in contact_data.lower():
             found_apps.append(app)
             continue
         
@@ -488,7 +474,7 @@ async def admin_callback_handler(callback: types.CallbackQuery):
         await callback.message.answer(f"📊 Всего: {stats['total']}\nНовых: {stats['new']}\nОбработано: {stats['processed']}")
     
     elif action == "admin_search":
-        await callback.message.answer("🔍 Введите ID или имя для поиска:\n\nПримеры:\n`/search 3` - по ID\n`/search "Имя"` - по имени\n`/search @username` - по username", parse_mode="Markdown")
+        await callback.message.answer("🔍 Введите ID или имя для поиска:\n\nПримеры:\n`/search 3` - найти заявку номер 3\n`/search антон` - найти все заявки Антона", parse_mode="Markdown")
     
     elif action == "admin_check_reminders":
         reminders = db.get_due_reminders()
@@ -637,14 +623,20 @@ async def start_http_server():
     return runner
 
 async def main():
+    # Ждем 3 секунды перед запуском, чтобы старые инстансы завершились
+    print("⏳ Ждем 3 секунды перед запуском...")
+    await asyncio.sleep(3)
+    
     http_server = await start_http_server()
     try:
         await bot.delete_webhook(drop_pending_updates=True)
     except:
         pass
+    
+    print("🚀 Бот запускается...")
     await dp.start_polling(bot)
+    
     await http_server.cleanup()
 
 if __name__ == "__main__":
     asyncio.run(main())
-
