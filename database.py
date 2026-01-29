@@ -52,7 +52,17 @@ class Database:
         except:
             pass
     
+    def mark_reminder_sent(self, reminder_id):
+        """Пометить напоминание как отправленное"""
+        try:
+            self.cursor.execute('UPDATE reminders SET sent = 1 WHERE id = ?', (reminder_id,))
+            self.conn.commit()
+            return True
+        except:
+            return False
+    
     def get_due_reminders(self):
+        """Получить непосланные напоминания на сегодня или ранее"""
         try:
             today = datetime.now().strftime('%Y-%m-%d')
             self.cursor.execute('''
@@ -76,6 +86,15 @@ class Database:
     def get_application_by_id(self, app_id):
         self.cursor.execute('SELECT * FROM applications WHERE id = ?', (app_id,))
         return self.cursor.fetchone()
+    
+    def update_status(self, app_id, status):
+        self.cursor.execute('UPDATE applications SET status = ? WHERE id = ?', (status, app_id))
+        self.conn.commit()
+    
+    def delete_application(self, app_id):
+        self.cursor.execute('DELETE FROM reminders WHERE application_id = ?', (app_id,))
+        self.cursor.execute('DELETE FROM applications WHERE id = ?', (app_id,))
+        self.conn.commit()
     
     def get_stats(self):
         self.cursor.execute('SELECT COUNT(*) FROM applications')
