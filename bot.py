@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -16,16 +15,8 @@ from utils import validate_email, validate_phone, validate_telegram_username, va
 
 load_dotenv()
 
-# Отладочный вывод
-print("=" * 50)
-print(f"BOT_TOKEN: {'установлен' if os.getenv('BOT_TOKEN') else 'НЕ УСТАНОВЛЕН!'}")
-print(f"ADMIN_ID из env: {os.getenv('ADMIN_ID')}")
-print("=" * 50)
-
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = int(os.getenv('ADMIN_ID', '0'))
-
-print(f"DEBUG: FINAL ADMIN_ID = {ADMIN_ID}")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -41,63 +32,46 @@ class ApplicationStates(StatesGroup):
     waiting_for_time = State()
 
 def get_main_keyboard():
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📝 Запись на занятие")],
-            [KeyboardButton(text="❓ Вопрос по курсу")],
-            [KeyboardButton(text="📋 Прочее")],
-            [KeyboardButton(text="📊 Статистика")]
-        ],
-        resize_keyboard=True
-    )
-    return keyboard
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="📝 Запись на занятие")],
+        [KeyboardButton(text="❓ Вопрос по курсу")],
+        [KeyboardButton(text="📋 Прочее")],
+        [KeyboardButton(text="📊 Статистика")]
+    ], resize_keyboard=True)
 
 def get_contact_type_keyboard():
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📧 Email")],
-            [KeyboardButton(text="📞 Телефон")],
-            [KeyboardButton(text="👤 Telegram")]
-        ],
-        resize_keyboard=True
-    )
-    return keyboard
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="📧 Email")],
+        [KeyboardButton(text="📞 Телефон")],
+        [KeyboardButton(text="👤 Telegram")]
+    ], resize_keyboard=True)
 
 def get_date_keyboard():
     dates = get_next_dates(7)
     rows = []
-    
     row = []
     for i, date_info in enumerate(dates):
         row.append(KeyboardButton(text=date_info['display']))
         if len(row) == 2 or i == len(dates) - 1:
             rows.append(row)
             row = []
-    
     rows.append([KeyboardButton(text="❌ Без даты")])
-    
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 def get_time_keyboard():
     times = get_time_slots()
     rows = []
-    
     row = []
     for i, time in enumerate(times):
         row.append(KeyboardButton(text=time))
         if len(row) == 3 or i == len(times) - 1:
             rows.append(row)
             row = []
-    
     rows.append([KeyboardButton(text="❌ Без времени")])
-    
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 def get_cancel_keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="❌ Отмена")]],
-        resize_keyboard=True
-    )
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
 
 def get_admin_applications_keyboard(app_id):
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -120,266 +94,62 @@ def get_admin_main_keyboard():
         [InlineKeyboardButton(text="⏰ Проверить напоминания", callback_data="admin_check_reminders")]
     ])
 
-def format_application_short(app):
-    app_id, user_id, username, full_name, contact_type, contact_data, app_type, message_text, appointment_date, appointment_time, created_at, status = app
-    
-    text = f"🆔 #{app_id} | {full_name} | {app_type.upper()}\n"
-    
-    if appointment_date:
-        date_display = datetime.strptime(appointment_date, '%Y-%m-%d').strftime('%d.%m.%Y')
-        text += f"📅 {date_display}"
-        if appointment_time:
-            text += f" ⏰ {appointment_time}\n"
-        else:
-            text += "\n"
-    
-    text += f"💬 {message_text[:50]}..."
-    
-    return text
-
-def format_application_detailed(app):
-    app_id, user_id, username, full_name, contact_type, contact_data, app_type, message_text, appointment_date, appointment_time, created_at, status = app
-    
-    text = f"📋 ЗАЯВКА #{app_id}\n\n"
-    text += f"👤 Имя: {full_name}\n"
-    text += f"👤 TG username: @{username if username else 'не указан'}\n"
-    text += f"🆔 TG ID: {user_id}\n"
-    text += f"📱 Контакт ({contact_type}): {contact_data}\n"
-    text += f"📋 Тип: {app_type}\n"
-    
-    if appointment_date:
-        date_display = datetime.strptime(appointment_date, '%Y-%m-%d').strftime('%d.%m.%Y')
-        text += f"📅 Дата: {date_display}\n"
-        if appointment_time:
-            text += f"⏰ Время: {appointment_time}\n"
-    
-    text += f"💬 Сообщение:\n{message_text}\n\n"
-    text += f"📅 Создана: {created_at}\n"
-    text += f"📊 Статус: {status}\n"
-    
-    return text
-
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
-        "👋 Добро пожаловать в КлассОнлайн!\n\n"
-        "Я помогу вам:\n"
-        "• Записаться на занятия\n"
-        "• Получить ответы на вопросы по курсам\n"
-        "• Решить другие вопросы\n\n"
-        "Выберите тип обращения:",
+        "👋 Добро пожаловать!\nВыберите тип обращения:",
         reply_markup=get_main_keyboard()
     )
 
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
-    help_text = (
-        "📚 Список доступных команд:\n\n"
-        "/start - Начать работу с ботом\n"
-        "/help - Показать эту справку\n"
-        "/stats - Показать статистику заявок\n"
-        "/cancel - Отменить текущее действие\n"
-    )
-    
+    help_text = "/start - Начать\n/help - Справка\n/stats - Статистика\n/cancel - Отмена\n"
     if message.from_user.id == ADMIN_ID:
-        help_text += (
-            "\n👨‍💼 Команды администратора:\n"
-            "/admin - Панель администратора\n"
-            "/applications - Новые заявки\n"
-            "/view_all - Все заявки\n"
-            "/stats_full - Полная статистика\n"
-            "/search [ID] - Найти заявку по ID\n"
-            "/check_reminders - Проверить напоминания\n"
-        )
-    
+        help_text += "\nАдмин:\n/admin\n/applications\n/view_all\n/search [ID]\n/check_reminders\n/test_reminder"
     await message.answer(help_text)
 
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):
     stats = db.get_stats()
-    await message.answer(
-        f"📊 Статистика заявок:\n\n"
-        f"Всего заявок: {stats['total']}\n"
-        f"Новых: {stats['new']}\n"
-        f"Обработано: {stats['processed']}"
-    )
+    await message.answer(f"📊 Статистика:\nВсего: {stats['total']}\nНовых: {stats['new']}\nОбработано: {stats['processed']}")
 
 @dp.message(Command("admin"))
 async def cmd_admin(message: types.Message):
-    print(f"DEBUG admin command: user_id={message.from_user.id}, ADMIN_ID={ADMIN_ID}")
     if message.from_user.id == ADMIN_ID:
-        await message.answer(
-            "👨‍💼 Панель администратора\n\n"
-            "Выберите действие:",
-            reply_markup=get_admin_main_keyboard()
-        )
+        await message.answer("👨‍💼 Панель администратора:", reply_markup=get_admin_main_keyboard())
     else:
-        await message.answer("⛔ У вас нет доступа к админ-панели")
+        await message.answer("⛔ Нет доступа")
 
 @dp.message(Command("check_reminders"))
 async def cmd_check_reminders(message: types.Message):
-    print(f"DEBUG check_reminders: user_id={message.from_user.id}, ADMIN_ID={ADMIN_ID}")
     if message.from_user.id != ADMIN_ID:
-        await message.answer("⛔ Доступ запрещен")
+        await message.answer("⛔ Нет доступа")
         return
     
     reminders = db.get_due_reminders()
-    
-    if reminders:
-        text = "⏰ НАПОМИНАНИЯ ДЛЯ ОТПРАВКИ:\n\n"
-        for i, reminder in enumerate(reminders[:10], 1):
-            app_id, reminder_id, user_id, username = reminder[0], reminder[1], reminder[2], reminder[3]
-            application = db.get_application_by_id(app_id)
-            
-            if application:
-                date_display = datetime.strptime(application[8], '%Y-%m-%d').strftime('%d.%m.%Y')
-                text += f"{i}. Заявка #{app_id} | 👤 {application[3]} | 📅 {date_display}\n"
-        
-        if len(reminders) > 10:
-            text += f"\n... и еще {len(reminders) - 10} напоминаний"
-        
-        text += f"\n\nВсего: {len(reminders)} напоминаний"
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Отправить все напоминания", callback_data="admin_send_all_reminders")]
-        ])
-        
-        await message.answer(text, reply_markup=keyboard)
-    else:
-        await message.answer("✅ Нет напоминаний для отправки")
-
-@dp.message(Command("applications"))
-async def cmd_applications(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("⛔ Доступ запрещен")
+    if not reminders:
+        await message.answer("✅ Нет напоминаний")
         return
     
-    applications = db.get_applications('new')
-    
-    if not applications:
-        await message.answer("📭 Нет новых заявок")
-        return
-    
-    await message.answer(f"📋 Найдено новых заявок: {len(applications)}")
-    
-    for app in applications[:10]:
-        app_text = format_application_short(app)
-        keyboard = get_admin_applications_keyboard(app[0])
-        await message.answer(app_text, reply_markup=keyboard)
-
-@dp.message(Command("view_all"))
-async def cmd_view_all(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("⛔ Доступ запрещен")
-        return
-    
-    applications = db.get_all_applications()
-    
-    if not applications:
-        await message.answer("📭 Нет заявок в базе данных")
-        return
-    
-    new_apps = []
-    processed_apps = []
-    
-    for app in applications:
-        if app[11] == 'new':
-            new_apps.append(app)
-        else:
-            processed_apps.append(app)
-    
-    text = "📋 ВСЕ ЗАЯВКИ\n\n"
-    
-    if new_apps:
-        text += f"🆕 НОВЫЕ ({len(new_apps)}):\n"
-        for i, app in enumerate(new_apps[:5], 1):
-            app_text = format_application_short(app)
-            text += f"{i}. {app_text}\n"
-        
-        if len(new_apps) > 5:
-            text += f"... и еще {len(new_apps) - 5} новых заявок\n"
-    
-    if processed_apps:
-        text += f"\n✅ ОБРАБОТАННЫЕ ({len(processed_apps)}):\n"
-        for i, app in enumerate(processed_apps[:5], 1):
-            app_text = format_application_short(app)
-            text += f"{i}. {app_text}\n"
-        
-        if len(processed_apps) > 5:
-            text += f"... и еще {len(processed_apps) - 5} обработанных заявок\n"
-    
-    text += f"\n📊 Итого: {len(new_apps)} новых, {len(processed_apps)} обработанных"
-    
-    await message.answer(text)
-
-@dp.message(Command("search"))
-async def cmd_search(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("⛔ Доступ запрещен")
-        return
-    
-    args = message.text.split()
-    if len(args) < 2:
-        await message.answer("Использование: /search [ID_заявки]")
-        return
-    
-    try:
-        app_id = int(args[1])
+    text = "⏰ НАПОМИНАНИЯ:\n\n"
+    for i, reminder in enumerate(reminders[:10], 1):
+        app_id, reminder_id, user_id, username = reminder[0], reminder[1], reminder[2], reminder[3]
         application = db.get_application_by_id(app_id)
-        
         if application:
-            app_text = format_application_detailed(application)
-            keyboard = get_admin_applications_keyboard(app_id)
-            await message.answer(app_text, reply_markup=keyboard)
-        else:
-            await message.answer(f"❌ Заявка с ID {app_id} не найдена")
-    except ValueError:
-        await message.answer("❌ Неверный формат ID. Используйте число.")
-
-@dp.message(Command("stats_full"))
-async def cmd_stats_full(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
+            date_display = datetime.strptime(application[8], '%Y-%m-%d').strftime('%d.%m.%Y')
+            text += f"{i}. #{app_id} | {application[3]} | {date_display}"
+            if user_id == ADMIN_ID:
+                text += " 👨‍💼"
+            text += "\n"
     
-    stats = db.get_stats()
-    applications = db.get_all_applications()
+    if len(reminders) > 10:
+        text += f"\n... и еще {len(reminders) - 10}"
+    text += f"\n\nВсего: {len(reminders)}"
     
-    type_stats = {}
-    date_stats = {}
-    
-    for app in applications:
-        app_type = app[6]
-        date = app[8]
-        
-        type_stats[app_type] = type_stats.get(app_type, 0) + 1
-        if date:
-            date_stats[date] = date_stats.get(date, 0) + 1
-    
-    stats_text = "📊 ПОЛНАЯ СТАТИСТИКА\n\n"
-    stats_text += f"Всего заявок: {stats['total']}\n"
-    stats_text += f"Новых: {stats['new']}\n"
-    stats_text += f"Обработано: {stats['processed']}\n\n"
-    
-    if type_stats:
-        stats_text += "📝 По типам:\n"
-        for app_type, count in type_stats.items():
-            stats_text += f"• {app_type}: {count}\n"
-    
-    if date_stats:
-        stats_text += "\n📅 Ближайшие встречи:\n"
-        sorted_dates = sorted(date_stats.items())[:5]
-        for date, count in sorted_dates:
-            stats_text += f"• {date}: {count} встреч\n"
-    
-    await message.answer(stats_text)
-
-@dp.message(Command("cancel"))
-async def cmd_cancel(message: types.Message, state: FSMContext):
-    await state.clear()
-    await message.answer(
-        "Действие отменено. Выберите тип обращения:",
-        reply_markup=get_main_keyboard()
-    )
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Отправить все", callback_data="admin_send_all_reminders")]
+    ])
+    await message.answer(text, reply_markup=keyboard)
 
 @dp.message(F.text.in_(["📝 Запись на занятие", "❓ Вопрос по курсу", "📋 Прочее"]))
 async def process_application_type(message: types.Message, state: FSMContext):
@@ -388,28 +158,18 @@ async def process_application_type(message: types.Message, state: FSMContext):
         "❓ Вопрос по курсу": "вопрос",
         "📋 Прочее": "прочее"
     }[message.text]
-    
     await state.update_data(application_type=app_type)
     await state.set_state(ApplicationStates.waiting_for_name)
-    
-    await message.answer(
-        "👤 Пожалуйста, введите ваше полное имя:",
-        reply_markup=get_cancel_keyboard()
-    )
+    await message.answer("👤 Ваше полное имя:", reply_markup=get_cancel_keyboard())
 
 @dp.message(ApplicationStates.waiting_for_name)
 async def process_name(message: types.Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await cmd_cancel(message, state)
         return
-    
     await state.update_data(full_name=message.text)
     await state.set_state(ApplicationStates.waiting_for_contact_type)
-    
-    await message.answer(
-        "📱 Выберите предпочтительный способ связи:",
-        reply_markup=get_contact_type_keyboard()
-    )
+    await message.answer("📱 Способ связи:", reply_markup=get_contact_type_keyboard())
 
 @dp.message(ApplicationStates.waiting_for_contact_type)
 async def process_contact_type(message: types.Message, state: FSMContext):
@@ -417,14 +177,9 @@ async def process_contact_type(message: types.Message, state: FSMContext):
         await cmd_cancel(message, state)
         return
     
-    contact_type_map = {
-        "📧 Email": "email",
-        "📞 Телефон": "phone",
-        "👤 Telegram": "telegram"
-    }
-    
+    contact_type_map = {"📧 Email": "email", "📞 Телефон": "phone", "👤 Telegram": "telegram"}
     if message.text not in contact_type_map:
-        await message.answer("Пожалуйста, выберите способ связи из предложенных:", reply_markup=get_contact_type_keyboard())
+        await message.answer("Выберите способ связи:", reply_markup=get_contact_type_keyboard())
         return
     
     contact_type = contact_type_map[message.text]
@@ -432,11 +187,10 @@ async def process_contact_type(message: types.Message, state: FSMContext):
     await state.set_state(ApplicationStates.waiting_for_contact)
     
     prompt_text = {
-        "email": "📧 Введите ваш email адрес (например: user@example.com):",
-        "phone": "📞 Введите ваш номер телефона (например: +79991234567):",
-        "telegram": "👤 Введите ваш Telegram username (например: @username или просто username):"
+        "email": "📧 Ваш email:",
+        "phone": "📞 Ваш телефон:",
+        "telegram": "👤 Ваш Telegram:"
     }[contact_type]
-    
     await message.answer(prompt_text, reply_markup=get_cancel_keyboard())
 
 @dp.message(ApplicationStates.waiting_for_contact)
@@ -452,41 +206,33 @@ async def process_contact(message: types.Message, state: FSMContext):
     is_valid = False
     if contact_type == "email":
         is_valid = validate_email(contact_data)
-        error_msg = "❌ Некорректный email адрес. Пожалуйста, введите правильный email (например: user@example.com):"
+        error_msg = "❌ Неверный email"
     elif contact_type == "phone":
         is_valid = validate_phone(contact_data)
-        error_msg = "❌ Некорректный номер телефона. Пожалуйста, введите правильный номер (например: +79991234567):"
+        error_msg = "❌ Неверный телефон"
     else:
         if contact_data.startswith('@'):
             contact_data = contact_data[1:]
         is_valid = validate_telegram_username(contact_data)
-        error_msg = "❌ Некорректный Telegram username. Пожалуйста, введите правильный username (5-32 символа, только буквы, цифры и _):"
+        error_msg = "❌ Неверный Telegram"
     
     if not is_valid:
         await message.answer(error_msg, reply_markup=get_cancel_keyboard())
         return
     
-    if contact_type == 'telegram' and contact_data.startswith('@'):
-        contact_data = contact_data[1:]
-    
     await state.update_data(contact_data=contact_data)
     
     if data['application_type'] == 'запись':
         await state.set_state(ApplicationStates.waiting_for_date)
-        
         dates = get_next_dates(7)
-        dates_text = "📅 Выберите предпочтительную дату из списка ниже:\n\n"
+        dates_text = "📅 Выберите дату:\n\n"
         for date_info in dates:
             dates_text += f"• {date_info['display']}\n"
-        dates_text += "\nИли нажмите ❌ Без даты"
-        
+        dates_text += "\nИли ❌ Без даты"
         await message.answer(dates_text, reply_markup=get_date_keyboard())
     else:
         await state.set_state(ApplicationStates.waiting_for_message)
-        await message.answer(
-            "💬 Пожалуйста, опишите ваш вопрос или пожелание:",
-            reply_markup=get_cancel_keyboard()
-        )
+        await message.answer("💬 Ваш вопрос:", reply_markup=get_cancel_keyboard())
 
 @dp.message(ApplicationStates.waiting_for_date)
 async def process_date(message: types.Message, state: FSMContext):
@@ -497,31 +243,24 @@ async def process_date(message: types.Message, state: FSMContext):
     if message.text == "❌ Без даты":
         await state.update_data(appointment_date=None)
         await state.set_state(ApplicationStates.waiting_for_message)
-        await message.answer(
-            "💬 Пожалуйста, опишите вашу заявку или вопрос:",
-            reply_markup=get_cancel_keyboard()
-        )
+        await message.answer("💬 Ваш вопрос:", reply_markup=get_cancel_keyboard())
         return
     
     try:
         date_obj = datetime.strptime(message.text, '%d.%m.%Y')
         formatted_date = date_obj.strftime('%Y-%m-%d')
-        
         if not validate_date(formatted_date):
             raise ValueError
-        
         await state.update_data(appointment_date=formatted_date)
         await state.set_state(ApplicationStates.waiting_for_time)
-        
         times = get_time_slots()
-        times_text = "⏰ Выберите предпочтительное время из списка ниже:\n\n"
+        times_text = "⏰ Выберите время:\n\n"
         for time in times:
             times_text += f"• {time}\n"
-        times_text += "\nИли нажмите ❌ Без времени"
-        
+        times_text += "\nИли ❌ Без времени"
         await message.answer(times_text, reply_markup=get_time_keyboard())
-    except ValueError:
-        await message.answer("❌ Некорректная дата. Пожалуйста, выберите дату из списка:", reply_markup=get_date_keyboard())
+    except:
+        await message.answer("❌ Неверная дата", reply_markup=get_date_keyboard())
 
 @dp.message(ApplicationStates.waiting_for_time)
 async def process_time(message: types.Message, state: FSMContext):
@@ -533,15 +272,12 @@ async def process_time(message: types.Message, state: FSMContext):
         await state.update_data(appointment_time=None)
     else:
         if not validate_time(message.text):
-            await message.answer("❌ Некорректное время. Пожалуйста, выберите время из списка:", reply_markup=get_time_keyboard())
+            await message.answer("❌ Неверное время", reply_markup=get_time_keyboard())
             return
         await state.update_data(appointment_time=message.text)
     
     await state.set_state(ApplicationStates.waiting_for_message)
-    await message.answer(
-        "💬 Пожалуйста, опишите вашу заявку или вопрос:",
-        reply_markup=get_cancel_keyboard()
-    )
+    await message.answer("💬 Ваш вопрос:", reply_markup=get_cancel_keyboard())
 
 @dp.message(ApplicationStates.waiting_for_message)
 async def process_message(message: types.Message, state: FSMContext):
@@ -553,7 +289,7 @@ async def process_message(message: types.Message, state: FSMContext):
     
     app_id = db.add_application(
         user_id=message.from_user.id,
-        username=message.from_user.username or "не указан",
+        username=message.from_user.username or "",
         full_name=user_data['full_name'],
         contact_type=user_data['contact_type'],
         contact_data=user_data['contact_data'],
@@ -563,62 +299,40 @@ async def process_message(message: types.Message, state: FSMContext):
         appointment_time=user_data.get('appointment_time')
     )
     
-    await notify_admin(app_id, user_data, message.text)
+    # Уведомление админу
+    try:
+        admin_text = f"📝 НОВАЯ ЗАЯВКА #{app_id}\n"
+        admin_text += f"👤 {user_data['full_name']}\n"
+        if user_data.get('appointment_date'):
+            date_display = datetime.strptime(user_data['appointment_date'], '%Y-%m-%d').strftime('%d.%m.%Y')
+            admin_text += f"📅 {date_display}"
+            if user_data.get('appointment_time'):
+                admin_text += f" ⏰ {user_data['appointment_time']}"
+            admin_text += "\n"
+        admin_text += f"💬 {message.text[:50]}..."
+        keyboard = get_admin_applications_keyboard(app_id)
+        await bot.send_message(ADMIN_ID, admin_text, reply_markup=keyboard)
+    except:
+        pass
     
-    confirmation_text = (
-        "✅ Ваша заявка принята!\n\n"
-        f"📝 Тип: {user_data['application_type']}\n"
-        f"👤 Имя: {user_data['full_name']}\n"
-        f"📱 Контакт: {user_data['contact_data']}\n"
-    )
-    
+    # Ответ пользователю
+    confirmation = "✅ Заявка принята!\n\n"
+    confirmation += f"👤 {user_data['full_name']}\n"
     if user_data.get('appointment_date'):
         date_display = datetime.strptime(user_data['appointment_date'], '%Y-%m-%d').strftime('%d.%m.%Y')
-        confirmation_text += f"📅 Дата: {date_display}\n"
+        confirmation += f"📅 {date_display}\n"
         if user_data.get('appointment_time'):
-            confirmation_text += f"⏰ Время: {user_data['appointment_time']}\n"
+            confirmation += f"⏰ {user_data['appointment_time']}\n"
+    confirmation += "\nСвяжемся с вами!"
+    await message.answer(confirmation, reply_markup=get_main_keyboard())
     
-    confirmation_text += "\nМы свяжемся с вами в ближайшее время!"
-    
-    await message.answer(confirmation_text, reply_markup=get_main_keyboard())
-    
+    # Добавление напоминания
     if user_data.get('appointment_date'):
         reminder_date = datetime.strptime(user_data['appointment_date'], '%Y-%m-%d')
         reminder_date = reminder_date.replace(day=reminder_date.day - 1)
         db.add_reminder(app_id, reminder_date.strftime('%Y-%m-%d'))
-        print(f"✅ Добавлено напоминание для заявки #{app_id} на {reminder_date}")
     
     await state.clear()
-
-async def notify_admin(app_id, user_data, message_text):
-    try:
-        admin_text = "📝 НОВАЯ ЗАЯВКА!\n\n"
-        
-        if user_data.get('appointment_date'):
-            date_display = datetime.strptime(user_data['appointment_date'], '%Y-%m-%d').strftime('%d.%m.%Y')
-            admin_text += f"📅 ВСТРЕЧА:\n\n"
-            admin_text += f"🆔 {app_id}\n"
-            admin_text += f"👤 {user_data['full_name']}\n"
-            admin_text += f"📅 {date_display}"
-            if user_data.get('appointment_time'):
-                admin_text += f" ⏰ {user_data['appointment_time']}\n"
-            else:
-                admin_text += "\n"
-            
-            contact_display = f"@{user_data['contact_data']}" if user_data['contact_type'] == 'telegram' else user_data['contact_data']
-            admin_text += f"📞 {contact_display}\n\n"
-        else:
-            admin_text += f"🆔 ID: {app_id}\n"
-            admin_text += f"👤 Имя: {user_data['full_name']}\n"
-        
-        admin_text += f"📋 Тип: {user_data['application_type']}\n"
-        admin_text += f"💬 Сообщение: {message_text[:100]}...\n\n"
-        admin_text += f"👤 ID пользователя Telegram: {user_data.get('user_id', 'не указан')}"
-        
-        keyboard = get_admin_applications_keyboard(app_id)
-        await bot.send_message(ADMIN_ID, admin_text, reply_markup=keyboard)
-    except Exception as e:
-        print(f"Ошибка при отправке уведомления админу: {e}")
 
 @dp.message(F.text == "📊 Статистика")
 async def show_stats_button(message: types.Message):
@@ -626,276 +340,196 @@ async def show_stats_button(message: types.Message):
 
 @dp.callback_query(lambda c: c.data.startswith("admin_"))
 async def admin_callback_handler(callback: types.CallbackQuery):
-    print(f"DEBUG admin_callback: user_id={callback.from_user.id}, ADMIN_ID={ADMIN_ID}")
     if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен")
+        await callback.answer("Нет доступа")
         return
     
     action = callback.data
     
     if action == "admin_new":
-        applications = db.get_applications('new')
-        if applications:
-            await callback.message.answer(f"📋 Найдено новых заявок: {len(applications)}")
-            for app in applications[:5]:
-                app_text = format_application_short(app)
+        apps = db.get_applications('new')
+        if apps:
+            await callback.message.answer(f"📋 Новых: {len(apps)}")
+            for app in apps[:5]:
+                text = f"#{app[0]} | {app[3]} | {app[6]}\n{app[7][:50]}..."
                 keyboard = get_admin_applications_keyboard(app[0])
-                await callback.message.answer(app_text, reply_markup=keyboard)
+                await callback.message.answer(text, reply_markup=keyboard)
         else:
-            await callback.message.answer("📭 Нет новых заявок")
+            await callback.message.answer("📭 Нет новых")
     
     elif action == "admin_all":
-        applications = db.get_all_applications()
-        if applications:
-            new_apps = []
-            processed_apps = []
-            
-            for app in applications:
-                if app[11] == 'new':
-                    new_apps.append(app)
-                else:
-                    processed_apps.append(app)
-            
-            text = "📋 ВСЕ ЗАЯВКИ\n\n"
-            
-            if new_apps:
-                text += f"🆕 НОВЫЕ ({len(new_apps)}):\n"
-                for i, app in enumerate(new_apps[:5], 1):
-                    app_text = format_application_short(app)
-                    text += f"{i}. {app_text}\n"
-                
-                if len(new_apps) > 5:
-                    text += f"... и еще {len(new_apps) - 5} новых заявок\n"
-            
-            if processed_apps:
-                text += f"\n✅ ОБРАБОТАННЫЕ ({len(processed_apps)}):\n"
-                for i, app in enumerate(processed_apps[:5], 1):
-                    app_text = format_application_short(app)
-                    text += f"{i}. {app_text}\n"
-                
-                if len(processed_apps) > 5:
-                    text += f"... и еще {len(processed_apps) - 5} обработанных заявок\n"
-            
-            text += f"\n📊 Итого: {len(new_apps)} новых, {len(processed_apps)} обработанных"
-            
-            await callback.message.answer(text)
-        else:
+        apps = db.get_all_applications()
+        if not apps:
             await callback.message.answer("📭 Нет заявок")
+            return
+        
+        new = [a for a in apps if a[11] == 'new']
+        processed = [a for a in apps if a[11] != 'new']
+        
+        text = f"📋 ВСЕ: {len(apps)}\n🆕 Новых: {len(new)}\n✅ Обработано: {len(processed)}"
+        await callback.message.answer(text)
     
     elif action == "admin_stats":
         stats = db.get_stats()
-        await callback.message.answer(
-            f"📊 Статистика:\n\n"
-            f"Всего заявок: {stats['total']}\n"
-            f"Новых: {stats['new']}\n"
-            f"Обработано: {stats['processed']}"
-        )
+        await callback.message.answer(f"📊 Всего: {stats['total']}\nНовых: {stats['new']}\nОбработано: {stats['processed']}")
     
     elif action == "admin_search":
-        await callback.message.answer("Введите ID заявки для поиска:\nПример: /search 123")
+        await callback.message.answer("Введите: /search [ID]")
     
     elif action == "admin_check_reminders":
         reminders = db.get_due_reminders()
-        if reminders:
-            text = "⏰ НАПОМИНАНИЯ ДЛЯ ОТПРАВКИ:\n\n"
-            for i, reminder in enumerate(reminders[:10], 1):
-                app_id, reminder_id, user_id, username = reminder[0], reminder[1], reminder[2], reminder[3]
-                application = db.get_application_by_id(app_id)
-                
-                if application:
-                    date_display = datetime.strptime(application[8], '%Y-%m-%d').strftime('%d.%m.%Y')
-                    text += f"{i}. Заявка #{app_id} | 👤 {application[3]} | 📅 {date_display}\n"
-            
-            if len(reminders) > 10:
-                text += f"\n... и еще {len(reminders) - 10} напоминаний"
-            
-            text += f"\n\nВсего: {len(reminders)} напоминаний"
-            
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Отправить все напоминания", callback_data="admin_send_all_reminders")]
-            ])
-            
-            await callback.message.answer(text, reply_markup=keyboard)
-        else:
-            await callback.message.answer("✅ Нет напоминаний для отправки")
+        if not reminders:
+            await callback.message.answer("✅ Нет напоминаний")
+            return
+        
+        text = "⏰ НАПОМИНАНИЯ:\n\n"
+        for i, reminder in enumerate(reminders[:10], 1):
+            app_id, reminder_id, user_id, username = reminder[0], reminder[1], reminder[2], reminder[3]
+            application = db.get_application_by_id(app_id)
+            if application:
+                date_display = datetime.strptime(application[8], '%Y-%m-%d').strftime('%d.%m.%Y')
+                text += f"{i}. #{app_id} | {application[3]} | {date_display}\n"
+        
+        if len(reminders) > 10:
+            text += f"\n... и еще {len(reminders) - 10}"
+        text += f"\n\nВсего: {len(reminders)}"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Отправить все", callback_data="admin_send_all_reminders")]
+        ])
+        await callback.message.answer(text, reply_markup=keyboard)
     
     elif action == "admin_send_all_reminders":
         reminders = db.get_due_reminders()
-        if reminders:
-            sent_count = 0
-            failed_count = 0
-            failed_list = []
+        if not reminders:
+            await callback.message.answer("✅ Нет напоминаний")
+            return
+        
+        sent = 0
+        failed = 0
+        
+        await callback.message.answer(f"⏳ Отправка {len(reminders)}...")
+        
+        for reminder in reminders:
+            app_id, reminder_id, user_id, username = reminder[0], reminder[1], reminder[2], reminder[3]
+            application = db.get_application_by_id(app_id)
             
-           
-            await callback.message.answer(f"⏳ Начинаю отправку {len(reminders)} напоминаний...")
-            
-            for reminder in reminders:
-                app_id, reminder_id, user_id, username = reminder[0], reminder[1], reminder[2], reminder[3]
+            if application:
+                date_display = datetime.strptime(application[8], '%Y-%m-%d').strftime('%d.%m.%Y')
+                time_text = f" в {application[9]}" if application[9] else ""
+                reminder_text = f"🔔 НАПОМИНАНИЕ!\n\nВстреча завтра ({date_display}){time_text}\n\nПодготовьтесь!"
                 
-                application = db.get_application_by_id(app_id)
-                if application:
-                    date_display = datetime.strptime(application[8], '%Y-%m-%d').strftime('%d.%m.%Y')
-                    reminder_text = f"🔔 НАПОМИНАНИЕ!\n\nУ вас запланирована встреча завтра ({date_display})"
-                    
-                    if application[9]:
-                        reminder_text += f" в {application[9]}"
-                    
-                    reminder_text += "\n\nНе забудьте подготовиться!"
-                    
-                    try:
-                        
-                        await bot.send_message(user_id, reminder_text)
-                        db.mark_reminder_sent(reminder_id)
-                        sent_count += 1
-                        print(f"✅ Напоминание #{reminder_id} отправлено пользователю {user_id}")
-                        
-                    except Exception as e:
-                        failed_count += 1
-                        error_msg = str(e)
-                        
-                        
-                        if "bot was blocked by the user" in error_msg.lower():
-                            failed_list.append(f"Заявка #{app_id} - Пользователь заблокировал бота")
-                            print(f"❌ Пользователь {user_id} заблокировал бота")
-                        elif "chat not found" in error_msg.lower():
-                            failed_list.append(f"Заявка #{app_id} - Пользователь не начинал диалог с ботом")
-                            print(f"❌ Пользователь {user_id} не начинал диалог с ботом")
-                        elif "user is deactivated" in error_msg.lower():
-                            failed_list.append(f"Заявка #{app_id} - Аккаунт пользователя удален")
-                            print(f"❌ Аккаунт пользователя {user_id} удален")
-                        else:
-                            failed_list.append(f"Заявка #{app_id} - {error_msg[:50]}")
-                            print(f"❌ Ошибка отправки пользователю {user_id}: {error_msg}")
-            
-            
-            report = f"📊 ОТЧЕТ ОТПРАВКИ НАПОМИНАНИЙ\n\n"
-            report += f"✅ Успешно отправлено: {sent_count}\n"
-            report += f"❌ Не удалось отправить: {failed_count}\n"
-            report += f"📋 Всего обработано: {len(reminders)}\n"
-            
-            if failed_list:
-                report += f"\n📝 Ошибки ({min(len(failed_list), 5)} из {len(failed_list)}):\n"
-                for i, error in enumerate(failed_list[:5], 1):
-                    report += f"{i}. {error}\n"
-                
-                if len(failed_list) > 5:
-                    report += f"... и еще {len(failed_list) - 5} ошибок"
-            
-            
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔄 Проверить напоминания", callback_data="admin_check_reminders")]
-            ])
-            
-            await callback.message.answer(report, reply_markup=keyboard)
-            
-        else:
-            await callback.message.answer("✅ Нет напоминаний для отправки")
+                try:
+                    await bot.send_message(user_id, reminder_text)
+                    db.mark_reminder_sent(reminder_id)
+                    sent += 1
+                except Exception as e:
+                    # Для админа пробуем через callback
+                    if user_id == ADMIN_ID:
+                        try:
+                            await callback.message.answer(f"🔔 ДЛЯ ТЕБЯ!\n\nТвоя встреча завтра ({date_display}){time_text}")
+                            db.mark_reminder_sent(reminder_id)
+                            sent += 1
+                            continue
+                        except:
+                            pass
+                    failed += 1
+        
+        report = f"📊 ОТЧЕТ:\n✅ Отправлено: {sent}\n❌ Ошибок: {failed}\n📋 Всего: {len(reminders)}"
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Проверить", callback_data="admin_check_reminders")]
+        ])
+        await callback.message.answer(report, reply_markup=keyboard)
     
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("process_"))
 async def process_callback_handler(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен")
+        await callback.answer("Нет доступа")
         return
     
     app_id = int(callback.data.split("_")[1])
     db.update_status(app_id, "processed")
-    
-    await callback.answer("✅ Заявка отмечена как обработанная")
-    application = db.get_application_by_id(app_id)
-    if application:
-        app_text = format_application_detailed(application)
-        await callback.message.edit_text(app_text)
-        await callback.message.edit_reply_markup(get_admin_applications_keyboard(app_id))
+    await callback.answer("✅ Обработано")
 
 @dp.callback_query(lambda c: c.data.startswith("details_"))
 async def details_callback_handler(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен")
+        await callback.answer("Нет доступа")
         return
     
     app_id = int(callback.data.split("_")[1])
-    application = db.get_application_by_id(app_id)
-    
-    if application:
-        app_text = format_application_detailed(application)
+    app = db.get_application_by_id(app_id)
+    if app:
+        text = f"📋 #{app[0]}\n👤 {app[3]}\n📱 {app[5]}: {app[4]}\n📅 {app[8] or 'Нет'}\n⏰ {app[9] or 'Нет'}\n💬 {app[7]}\n📊 {app[11]}"
         keyboard = get_admin_applications_keyboard(app_id)
-        await callback.message.answer(app_text, reply_markup=keyboard)
-    
+        await callback.message.answer(text, reply_markup=keyboard)
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("delete_"))
 async def delete_callback_handler(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен")
+        await callback.answer("Нет доступа")
         return
     
     app_id = int(callback.data.split("_")[1])
     db.delete_application(app_id)
-    
-    await callback.answer("🗑️ Заявка удалена")
-    await callback.message.edit_text(f"🗑️ Заявка #{app_id} удалена")
+    await callback.answer("🗑️ Удалено")
+    await callback.message.edit_text(f"🗑️ #{app_id} удалена")
 
-@dp.callback_query(lambda c: c.data.startswith("message_"))
-async def message_callback_handler(callback: types.CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Доступ запрещен")
+@dp.message(Command("cancel"))
+async def cmd_cancel(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("❌ Отменено", reply_markup=get_main_keyboard())
+
+@dp.message(Command("test_reminder"))
+async def cmd_test_reminder(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа")
         return
     
-    app_id = int(callback.data.split("_")[1])
-    application = db.get_application_by_id(app_id)
+    from datetime import timedelta
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+    today = datetime.now().strftime('%Y-%m-%d')
     
-    if application:
-        user_id = application[1]
-        await callback.message.answer(f"Напишите сообщение для пользователя (ID: {user_id}):")
+    app_id = db.add_application(
+        user_id=message.from_user.id,
+        username="admin_test",
+        full_name="Тест Админ",
+        contact_type="telegram",
+        contact_data="admin",
+        app_type="запись",
+        message="Тест напоминания",
+        appointment_date=tomorrow,
+        appointment_time="10:00"
+    )
     
-    await callback.answer()
+    db.add_reminder(app_id, today)
+    await message.answer(f"✅ Тест заявка #{app_id} создана\nПроверь /check_reminders")
 
 async def health_check(request):
-    """Простой healthcheck для Railway"""
-    return web.Response(text="Bot is running")
+    return web.Response(text="OK")
 
 async def start_http_server():
-    """Запуск простого HTTP сервера для healthcheck"""
     app = web.Application()
     app.router.add_get('/', health_check)
     app.router.add_get('/health', health_check)
-    
     runner = web.AppRunner(app)
     await runner.setup()
-    
     port = int(os.getenv("PORT", 8080))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    
-    print(f"✅ HTTP сервер запущен на порту {port}")
     return runner
 
 async def main():
-    print("🚀 Бот запускается...")
-    print(f"✅ ADMIN_ID корректный: {ADMIN_ID}")
-    
-   
     http_server = await start_http_server()
-    
-  
     try:
         await bot.delete_webhook(drop_pending_updates=True)
-        print("✅ Вебхук удален")
-    except Exception as e:
-        print(f"ℹ️ Ошибка при удалении вебхука: {e}")
-    
-    
-    print("📡 Запускаем polling бота...")
-    
-    try:
-        await dp.start_polling(bot)
-    except Exception as e:
-        print(f"❌ Ошибка при запуске бота: {e}")
-    finally:
-        
-        await http_server.cleanup()
+    except:
+        pass
+    await dp.start_polling(bot)
+    await http_server.cleanup()
 
 if __name__ == "__main__":
     asyncio.run(main())
