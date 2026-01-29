@@ -70,21 +70,38 @@ def admin_app_kb(app_id):
         [InlineKeyboardButton(text="📝 Подробнее", callback_data=f"view_{app_id}")]
     ])
 
+# ====================
+# КОМАНДЫ ДЛЯ ВСЕХ
+# ====================
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
     await message.answer("👋 Добро пожаловать!\nВыберите тип обращения:", reply_markup=main_kb())
 
 @dp.message(Command("help"))
 async def help_cmd(message: types.Message):
-    text = "/start - Начать\n/help - Справка\n/stats - Статистика\n/cancel - Отмена"
+    text = "📚 ДОСТУПНЫЕ КОМАНДЫ:\n\n"
+    text += "/start - Начать работу\n"
+    text += "/help - Показать справку\n"
+    text += "/stats - Статистика заявок\n"
+    text += "/cancel - Отменить текущее действие"
+    
+    # ====================
+    # КОМАНДЫ АДМИНА
+    # ====================
     if message.from_user.id == ADMIN_ID:
-        text += "\n\nАдмин:\n/admin\n/applications\n/view_all\n/search id 3\n/search name олег\n/reminders"
+        text += "\n\n👨‍💼 КОМАНДЫ АДМИНА:\n"
+        text += "/admin - Панель администратора\n"
+        text += "/applications - Новые заявки\n"
+        text += "/view_all - Все заявки\n"
+        text += "/search [ID] - Найти заявку\n"
+        text += "/check_reminders - Проверить напоминания"
+    
     await message.answer(text)
 
 @dp.message(Command("stats"))
 async def stats_cmd(message: types.Message):
     stats = db.get_stats()
-    await message.answer(f"📊 Заявок: {stats['total']}\nНовых: {stats['new']}\nОбработано: {stats['processed']}")
+    await message.answer(f"📊 Статистика:\nВсего: {stats['total']}\nНовых: {stats['new']}\nОбработано: {stats['processed']}")
 
 @dp.message(Command("admin"))
 async def admin_cmd(message: types.Message):
@@ -254,6 +271,9 @@ async def cancel_cmd(message: types.Message, state: FSMContext):
 async def stats_btn(message: types.Message):
     await stats_cmd(message)
 
+# ====================
+# АДМИН КОЛБЭКИ
+# ====================
 @dp.callback_query(lambda c: c.data.startswith("admin_"))
 async def admin_callback(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -284,7 +304,7 @@ async def admin_callback(callback: types.CallbackQuery):
         await callback.message.answer(f"📊 Всего: {stats['total']}\nНовых: {stats['new']}\nОбработано: {stats['processed']}")
     
     elif action == "admin_search":
-        await callback.message.answer("🔍 Формат:\n/search id 3\n/search name олег")
+        await callback.message.answer("🔍 Использование:\n/search [ID]")
     
     elif action == "admin_check_reminders":
         reminders = db.get_due_reminders()
@@ -310,16 +330,18 @@ async def admin_callback(callback: types.CallbackQuery):
                     await bot.send_message(user_id, reminder_text)
                     db.mark_reminder_sent(reminder_id)
                     sent_count += 1
-                    text += f"✅ #{app_id} | {app[3]} | {date}{time_text}\n"
+                    text += f"✅ #{app_id} | {date}{time_text}\n"
                 except:
-                    text += f"❌ #{app_id} | {app[3]} | Ошибка отправки\n"
+                    text += f"❌ #{app_id} | Ошибка отправки\n"
         
         text += f"\n📊 Отправлено: {sent_count} из {len(reminders)}"
         await callback.message.answer(text)
     
     await callback.answer()
 
-# Обработка кнопок заявок
+# ====================
+# ОБРАБОТКА ЗАЯВОК
+# ====================
 @dp.callback_query(lambda c: c.data.startswith("done_"))
 async def done_handler(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -373,45 +395,105 @@ async def view_handler(callback: types.CallbackQuery):
     
     await callback.answer()
 
+# ====================
+# КОМАНДЫ АДМИНА
+# ====================
 @dp.message(Command("search"))
 async def search_cmd(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         await message.answer("⛔ Нет доступа")
         return
     
-    args = message.text.split(maxsplit=2)
-    if len(args) < 3:
-        await message.answer("❌ Формат: /search [id/name] [значение]")
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("❌ Использование: /search [ID]")
         return
     
-    search_type = args[1].lower()
-    query = args[2].strip().lower()
-    apps = db.get_all_applications()
+    try:
+        app_id = int(args[1])
+        app = db.get_application_by_id(app_id)
+        
+        if not app:
+            await message.answer(f"❌ Заявка #{app_id} не найдена")
+            return
+        
+        text = f"🔍 #{app[0]}\n👤 {app[3]}\n📱 @{app[4]}\n"
+        if app[7]:
+            date_display = datetime.strptime(app[7], '%Y-%m-%d').strftime('%d.%m.%Y')
+            text += f"📅 {date_display}"
+            if app[8]:
+                text += f" ⏰ {app[8]}"
+            text += "\n"
+        text += f"💬 {app[6]}\n📊 {app[10]}"
+        
+        await message.answer(text, reply_markup=admin_app_kb(app[0]))
+    except ValueError:
+        await message.answer("❌ ID должен быть числом")
+
+@dp.message(Command("applications"))
+async def applications_cmd(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа")
+        return
     
+    apps = db.get_applications('new')
+    if not apps:
+        await message.answer("📭 Нет новых заявок")
+        return
+    
+    await message.answer(f"📋 Новых заявок: {len(apps)}")
+    for app in apps[:5]:
+        text = f"#{app[0]} | {app[3]} | {app[5]}\n{app[6][:50]}..."
+        await message.answer(text, reply_markup=admin_app_kb(app[0]))
+
+@dp.message(Command("view_all"))
+async def view_all_cmd(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа")
+        return
+    
+    apps = db.get_all_applications()
     if not apps:
         await message.answer("📭 Нет заявок")
         return
     
-    found = []
-    for app in apps:
-        if search_type == "id" and query.isdigit() and int(query) == app[0]:
-            found.append(app)
-        elif search_type == "name" and query in app[3].lower():
-            found.append(app)
-    
-    if not found:
-        await message.answer(f"❌ Не найдено: {query}")
+    new = len([a for a in apps if a[10] == 'new'])
+    await message.answer(f"📋 Всего заявок: {len(apps)}\n🆕 Новых: {new}\n✅ Обработано: {len(apps)-new}")
+
+@dp.message(Command("check_reminders"))
+async def check_reminders_cmd(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа")
         return
     
-    if len(found) == 1:
-        app = found[0]
-        text = f"🔍 #{app[0]}\n👤 {app[3]}\n📱 @{app[4]}\n📅 {app[7] or 'Нет'}\n⏰ {app[8] or 'Нет'}\n💬 {app[6]}\n📊 {app[10]}"
-        await message.answer(text, reply_markup=admin_app_kb(app[0]))
-    else:
-        text = f"🔍 Найдено: {len(found)}\n\n"
-        for i, app in enumerate(found[:5], 1):
-            text += f"{i}. #{app[0]} | {app[3]} | {app[10]}\n"
-        await message.answer(text)
+    reminders = db.get_due_reminders()
+    if not reminders:
+        await message.answer("✅ Нет напоминаний для отправки")
+        return
+    
+    text = "⏰ Напоминания для отправки:\n\n"
+    sent_count = 0
+    
+    for rem in reminders:
+        app_id, reminder_id, user_id, username = rem
+        app = db.get_application_by_id(app_id)
+        
+        if app and app[7]:
+            date = datetime.strptime(app[7], '%Y-%m-%d').strftime('%d.%m.%Y')
+            time_text = f" в {app[8]}" if app[8] else ""
+            
+            reminder_text = f"🔔 НАПОМИНАНИЕ!\n\nУ вас запланирована встреча завтра ({date}){time_text}\n\nНе забудьте подготовиться!"
+            
+            try:
+                await bot.send_message(user_id, reminder_text)
+                db.mark_reminder_sent(reminder_id)
+                sent_count += 1
+                text += f"✅ #{app_id} | {date}{time_text}\n"
+            except:
+                text += f"❌ #{app_id} | Ошибка отправки\n"
+    
+    text += f"\n📊 Отправлено: {sent_count} из {len(reminders)}"
+    await message.answer(text)
 
 async def check_reminders():
     """Функция для автоматической проверки напоминаний"""
@@ -447,4 +529,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
