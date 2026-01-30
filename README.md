@@ -46,19 +46,19 @@
 - **Просмотр статистики**
 
 ---
-tg-bot/
-├── bot.py
-├── admin_panel.py
-├── database.py
-├── utils.py
-├── main.py
-│
-├── .env.example
-├── requirements.txt
-├── Procfile
-├── railway.json
-├── runtime.txt
-└── README.md
+tg-bot
+ bot.py
+ admin_panel.py
+ database.py
+ utils.py
+ main.py
+
+ .env.example
+ requirements.txt
+ Procfile
+ railway.json
+ runtime.txt
+ README.md
 
 ---
 
@@ -137,3 +137,4 @@ ADMIN_ID=telegram_admin_id
 - **Административная панель**
 - **Модульная архитектура**
 - **Облачное развертывание**
+
